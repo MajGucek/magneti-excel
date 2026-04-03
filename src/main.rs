@@ -1,75 +1,248 @@
-use std::collections::HashMap;
-use std::io::stderr;
-use std::path::PathBuf;
-use calamine::{open_workbook_auto, Reader};
+mod parse;
+mod db;
+
 use eframe::{Frame, NativeOptions};
-use eframe::HardwareAcceleration::Preferred;
 use eframe::egui::*;
 use egui_extras::{Column, TableBuilder};
-use calamine::DataType;
-use rfd::{MessageDialog, MessageLevel};
+use crate::db::{DBManager, ViewQuery};
+use crate::parse::{parse_extra_config_files, parse_import_files, parse_sifrant_file};
 
 struct App {
+    db_manager: DBManager,
     retry_import: bool,
     successfully_parsed: Option<bool>,
     successfully_stored_data: Option<bool>,
+    successfully_stored_sifrant: Option<bool>,
+
+    row_data: Option<Vec<ViewQuery>>,
+    successfully_loaded_query: Option<bool>,
+
+    opomba_material: String,
+    opomba_opomba: String,
+    successfully_stored_opomba: Option<bool>,
+
+    /* --Filters-- */
+    filter_sifra_materiala: String,
+    filter_naziv_materiala: String,
+    filter_nabavnik: String,
+    filter_zaloga_vecja: bool,
+    filter_poraba_vecja: bool,
+    filter_odprta_narocila: bool,
+    filter_dobavni_rok: bool,
+    filter_aktivni: bool,
 }
 
 impl App {
     pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Self {
         cc.egui_ctx.send_viewport_cmd(ViewportCommand::Maximized(true));
 
+        let mut row_data = None;
+        let db_manager = DBManager { db_name: "magneti_db.sqlite3".to_string() };
+        
+        let result = db_manager.get_data();
+        let mut successfully_loaded_query: Option<bool> = None;
+
+        match result {
+            Err(err) => {
+                println!("initial_load error: {:?}", err.to_string());
+                successfully_loaded_query = Some(false);
+            },
+            Ok(rows) => {
+                row_data = Some(rows);
+                println!("row_data loaded: {}", row_data.as_ref().unwrap().len());
+                successfully_loaded_query = Some(true);
+            }
+        }
+
         Self {
+            db_manager,
             retry_import: false,
             successfully_parsed: None,
             successfully_stored_data: None,
+            successfully_stored_sifrant: None,
+            row_data,
+            successfully_loaded_query,
+
+            opomba_material: String::new(),
+            opomba_opomba: String::new(),
+            successfully_stored_opomba: None,
+
+            filter_sifra_materiala: String::new(),
+            filter_naziv_materiala: String::new(),
+            filter_nabavnik: String::new(),
+            filter_zaloga_vecja: false,
+            filter_poraba_vecja: false,
+            filter_odprta_narocila: false,
+            filter_dobavni_rok: false,
+            filter_aktivni: true,
         }
     }
 
-    pub fn update_state(&mut self) {
+}
 
+
+impl App {
+    fn apply_filters(&self, rows: &Vec<ViewQuery>) -> Vec<ViewQuery> {
+        rows.iter()
+            .filter(|&row| {
+                format!("{}", row.material).contains(self.filter_sifra_materiala.as_str()) &&
+                    row.naziv_materiala.as_ref().is_some_and(|a| format!("{}", a).contains(self.filter_naziv_materiala.as_str())) &&
+                    row.nabavna_skupina.as_ref().is_some_and(|a| format!("{}", a).contains(self.filter_nabavnik.as_str())) &&
+                    (!self.filter_aktivni || row.zaloga.is_some_and(|zal| zal > 0.0) || row.poraba.is_some_and(|por| por > 0.0)) &&
+                    (!self.filter_zaloga_vecja || row.zaloga.is_some_and(|zal| zal > 0.)) &&
+                    (!self.filter_poraba_vecja || row.poraba.is_some_and(|por| por > 0.)) &&
+                    (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > 0.)) &&
+                    (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > 0.))
+
+        })
+            .cloned()
+            .collect()
+
+
+    }
+
+
+    pub fn render_table(&self, ui: &mut Ui) {
+        let data = match &self.row_data {
+            Some(d) => self.apply_filters(d),
+            None => return,
+        };
+
+        let number_width = 120.;
+        let string_width = 500.;
+
+        ScrollArea::both().show(ui, |ui| {
+            TableBuilder::new(ui)
+                .striped(true)
+                .cell_layout(Layout::left_to_right(Align::Center))
+                .columns(Column::exact(number_width), 1) // Material
+                .columns(Column::exact(string_width).at_least(string_width), 1) // Naziv materiala
+                .columns(Column::exact(number_width), 2) // nabavna_skupina, mrp_karakteristika
+                .columns(Column::exact(number_width), 4) // Zaloga, Poraba, Odprta narocila, Dobavni rok
+                .columns(Column::exact(number_width).at_least(number_width), 2) // trenutni zalogi
+                .columns(Column::remainder().at_least(string_width), 1) // Opomba
+                .header(50.0, |mut header| {
+                    header.col(|ui| {ui.heading("Material"); });
+                    header.col(|ui| {ui.heading("Naziv"); });
+                    header.col(|ui| {ui.heading("Nabavnik"); });
+                    header.col(|ui| {ui.heading("MRP"); });
+                    header.col(|ui| {ui.heading("Zaloga"); });
+                    header.col(|ui| {ui.heading("Poraba").on_hover_text("Povprečna mesečna poraba za zadnjih 12 mesecev"); });
+                    header.col(|ui| {ui.heading("Odprto").on_hover_text("Odprta naročila dobaviteljem"); });
+                    header.col(|ui| {ui.heading("Dobava").on_hover_text("Predviden dobavni rok v mesecih"); });
+                    header.col(|ui| {ui.heading("Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u"); });
+                    header.col(|ui| {ui.heading("Zaloga SAP in odprto").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil"); });
+                    header.col(|ui| {ui.heading("Opomba"); });
+                })
+                .body(|mut body| {
+                    for row in data.iter().take(50) {
+                        body.row(25.0, |mut row_ui| {
+                            row_ui.col(|ui| { ui.label(row.material.to_string()); });
+                            row_ui.col(|ui| { ui.label(row.naziv_materiala.clone().unwrap_or_else(|| "".to_string())); });
+                            row_ui.col(|ui| { ui.label(row.nabavna_skupina.clone().unwrap_or_else(|| "".to_string())); });
+                            row_ui.col(|ui| { ui.label(row.mrp_karakteristika.clone().unwrap_or_else(|| "".to_string())); });
+                            row_ui.col(|ui| { ui.label(row.zaloga.map_or("".to_string(), |v| format_number_custom(v))); });
+                            row_ui.col(|ui| { ui.label(row.poraba.map_or("".to_string(), |v| format_number_custom(v))); });
+                            row_ui.col(|ui| { ui.label(row.odprta_narocila.map_or("".to_string(), |v| format_number_custom(v))); });
+                            row_ui.col(|ui| { ui.label(row.dobavni_rok.map_or("".to_string(), |v| format_number_custom(v))); });
+                            row_ui.col(|ui| { ui.label(row.trenutna_zaloga_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v))); });
+                            row_ui.col(|ui| { ui.label(row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v))); });
+                            row_ui.col(|ui| { ui.label(row.opomba.clone().unwrap_or_else(|| "".to_string())); });
+
+                        });
+                    }
+                });
+        });
+    }
+}
+
+fn format_number_custom(value: f64) -> String {
+    let s = format!("{:.2}", value);
+    let mut parts = s.split('.').collect::<Vec<_>>();
+    if parts.len() == 2 {
+        let int_part = parts[0];
+        let dec_part = parts[1];
+        let int_part_with_sep = int_part.chars()
+            .rev()
+            .collect::<Vec<_>>()
+            .chunks(3)
+            .map(|chunk| chunk.iter().rev().collect::<String>())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join(".");
+        format!("{},{}", int_part_with_sep, dec_part)
+    } else {
+        s
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
-        ctx.request_repaint();
+        //ctx.request_repaint();
 
         CentralPanel::default().show(ctx, |ui| {
-            let total_height = ui.available_height();
-            let top_height = total_height * 0.15;
-            let bottom_height = total_height * 0.85;
+            ui.horizontal(|ui| {
+                if let Some(success) = self.successfully_loaded_query {
+                    let color = if success { Color32::GREEN } else { Color32::RED };
+                    ui.colored_label(color, "■");
+                }
+                if ui.button("Load").clicked() {
+                    match self.db_manager.get_data() {
+                        Ok(rows) => {
+                            self.row_data = Some(rows);
+                            self.successfully_loaded_query = Some(true);
+                        }
+                        Err(err) => {
+                            self.successfully_loaded_query = Some(false);
+                            println!("query_load error: {:?}", err);
+                        }
+                    }
+                }
 
-            // Search bar
-            ui.allocate_ui(vec2(ui.available_width(), top_height), |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Search:");
-                    ui.text_edit_singleline(&mut String::new());
-                });
+
             });
 
-            // Table
-            ui.allocate_ui(vec2(ui.available_width(), bottom_height), |ui| {
-                ScrollArea::vertical().show(ui, |ui| {
-                    TableBuilder::new(ui)
-                        .striped(true)
-                        .cell_layout(Layout::left_to_right(Align::Center))
-                        .columns(Column::remainder(), 2)
-                        .header(20.0, |mut header| {
-                            header.col(|ui| { ui.heading("ID"); });
-                            header.col(|ui| { ui.heading("Material"); });
-                        })
-                        .body(|mut body| {
-                            for row in 0..20 {
-                                body.row(18.0, |mut row_ui| {
-                                    row_ui.col(|ui| { ui.label("id"); });
-                                    row_ui.col(|ui| { ui.label("material"); });
-                                });
-                            }
-                        });
-                });
+            ui.add_space(4.0);
+
+            ScrollArea::vertical().show(ui, |ui| {
+                self.render_table(ui);
             });
         });
+
+
+        Window::new("Filtri")
+            .resizable(false)
+            .collapsible(true)
+            .default_open(true)
+            .default_size(vec2(600., 400.))
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add(
+                        TextEdit::singleline(&mut self.filter_sifra_materiala)
+                            .hint_text("Iskanje po šifri materiala...")
+                    );
+                    ui.add(
+                        TextEdit::singleline(&mut self.filter_naziv_materiala)
+                            .hint_text("Iskanje po nazivu materiala...")
+                    );
+                    ui.add(
+                        TextEdit::singleline(&mut self.filter_nabavnik)
+                            .hint_text("Iskanje po nabavniku...")
+                    );
+
+
+                    ui.checkbox(&mut self.filter_aktivni, "Pokaži le aktivne");
+                    ui.checkbox(&mut self.filter_zaloga_vecja, "zaloga večja od 0");
+                    ui.checkbox(&mut self.filter_poraba_vecja, "poraba večja od 0");
+                    ui.checkbox(&mut self.filter_odprta_narocila, "odprta naročila večja od 0");
+                    ui.checkbox(&mut self.filter_dobavni_rok, "dobavni rok večji kot 0");
+
+
+                });
+
+            });
 
         Window::new("Import")
             .resizable(false)
@@ -78,6 +251,7 @@ impl eframe::App for App {
             .default_size(vec2(300., 200.))
             .show(ctx, |ui| {
                 let import_button = ui.button("Add excel files");
+                let sifrant_button = ui.button("Add šifrant");
                 let extra_config_button = ui.button("Add extra configuration");
                 let mut file_input_error: Option<Box<dyn std::error::Error>> = None;
                 if import_button.clicked() {
@@ -92,12 +266,13 @@ impl eframe::App for App {
                             Ok(row_data) => {
                                 self.retry_import = false;
                                 self.successfully_parsed = Some(true);
-                                let db_result = store_to_db(row_data);
+                                let db_result = self.db_manager.store_to_db(row_data);
                                 match db_result {
                                     Ok(_) => {
                                         self.successfully_stored_data = Some(true);
                                     },
                                     Err(err) => {
+                                        println!("data: {:?}", err);
                                         self.successfully_stored_data = Some(false);
                                     }
                                 }
@@ -115,6 +290,36 @@ impl eframe::App for App {
                 }
 
 
+                if sifrant_button.clicked() {
+                    let downloads_dir = dirs_next::download_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
+                    let file = rfd::FileDialog::new()
+                        .set_title("Select file!")
+                        .set_directory(downloads_dir)
+                        .pick_file();
+                    if file.is_some() {
+                        let result = parse_sifrant_file(file.unwrap());
+                        match result {
+                            Ok(rows) => {
+                                let db_result = self.db_manager.store_sifrant_to_db(rows);
+                                match db_result {
+                                    Ok(_) => {
+                                        self.successfully_stored_sifrant = Some(true);
+                                    },
+                                    Err(err) => {
+                                        println!("Šifrant: {:?}", err);
+                                        self.successfully_stored_sifrant = Some(false);
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                file_input_error = Some(e);
+                            }
+                        }
+                    } else {
+                        self.retry_import = true;
+                    }
+                }
+
 
                 if extra_config_button.clicked() {
                     let downloads_dir = dirs_next::download_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
@@ -125,13 +330,14 @@ impl eframe::App for App {
                     if file.is_some() {
                         let result = parse_extra_config_files(file.unwrap());
                         match result {
-                            Ok(extra_config_row) => {
-                                let db_result = store_extra_config_to_db(extra_config_row);
+                            Ok(extra_config_rows) => {
+                                let db_result = self.db_manager.store_extra_config_to_db(extra_config_rows);
                                 match db_result {
                                     Ok(_) => {
                                         self.successfully_stored_data = Some(true);
                                     },
                                     Err(err) => {
+                                        println!("config: {:?}", err);
                                         self.successfully_stored_data = Some(false);
                                     }
                                 }
@@ -167,232 +373,66 @@ impl eframe::App for App {
                     }
                 }
 
+                if self.successfully_stored_sifrant.is_some() {
+                    if self.successfully_stored_sifrant.unwrap() {
+                        ui.colored_label(Color32::GREEN, "Successful store to database!");
+                    } else {
+                        ui.colored_label(Color32::ORANGE, "Failed to store to DB!");
+                    }
+                }
+
+
+            });
+
+
+        Window::new("Opomba")
+            .resizable(false)
+            .collapsible(true)
+            .default_open(true)
+            .default_size(vec2(300., 200.))
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Material: ");
+                        ui.text_edit_singleline(&mut self.opomba_material);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Opomba: ");
+                        ui.text_edit_singleline(&mut self.opomba_opomba);
+                    });
+                    let store_opomba = ui.button("Shrani opombo");
+                    if store_opomba.clicked() {
+                        let resp = self.db_manager.store_opomba_to_db((self.opomba_material.parse().unwrap_or(0), self.opomba_opomba.clone()));
+                        match resp {
+                            Err(err) => {
+                                println!("error storing opomba: {:?}", err.to_string());
+                                self.successfully_stored_opomba = Some(false);
+                            },
+                            Ok(_) => {
+                                println!("stored opomba!");
+                                self.successfully_stored_opomba = Some(true);
+                            }
+                        }
+                    }
+                    if self.successfully_stored_opomba.is_some() {
+                        if self.successfully_stored_opomba.unwrap() {
+                            ui.colored_label(Color32::GREEN, "Success!");
+                        } else {
+                            ui.colored_label(Color32::RED, "Failed to store opomba!");
+                        }
+                    }
+                    
+                });
 
             });
     }
 }
 
-#[derive(Default)]
-struct ExtraConfigRow {
-    nabavnik: String,
-    min_kolicina: f64,
-    pakiranje: f64,
-    dobavni_rok: f64,
-}
-
-fn parse_extra_config_files(path: PathBuf) -> Result<ExtraConfigRow, Box<dyn std::error::Error>> {
-    let mut workbook = open_workbook_auto(path)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
-    let mut extra_config = ExtraConfigRow::default();
-    for row in range.rows().skip(1) {
-        let nabavnik = row.get(0)
-            .and_then(DataType::get_string)
-            .unwrap_or("");
-        let min_kolicina = row.get(1)
-            .and_then(DataType::get_float)
-            .unwrap_or(0.);
-        let pakiranje = row.get(2)
-            .and_then(DataType::get_float)
-            .unwrap_or(0.);
-        let dobavni_rok = row.get(3)
-            .and_then(DataType::get_float)
-            .unwrap_or(0.);
-        extra_config = ExtraConfigRow {
-            nabavnik: nabavnik.to_string(),
-            min_kolicina,
-            pakiranje,
-            dobavni_rok
-        };
-    }
-
-    Ok(extra_config)
-}
-
-
-fn store_extra_config_to_db(extra_config_row: ExtraConfigRow) -> Result<(), Box<dyn std::error::Error>> {
-    let connection = sqlite::open("magneti_db.sqlite3")?;
-    connection.execute("
-        CREATE TABLE IF NOT EXISTS config (
-            id INTEGER PRIMARY KEY,
-            nabavnik TEXT NOT NULL,
-            min_kolicina REAL NOT NULL,
-            pakiranje REAL NOT NULL,
-            dobavni_rok REAL NOT NULL
-        );
-    ")?;
-
-
-    let mut statement = connection.prepare("
-        INSERT INTO config (nabavnik, min_kolicina, pakiranje, dobavni_rok) VALUES (?, ?, ?, ?)
-    ")?;
-
-    statement.bind(&[(1, extra_config_row.nabavnik.as_str())][..])?;
-    statement.bind((2, extra_config_row.min_kolicina))?;
-    statement.bind((3, extra_config_row.pakiranje))?;
-    statement.bind((4, extra_config_row.dobavni_rok))?;
-    statement.next()?;
-    statement.reset()?;
-
-    Ok(())
-}
-
-fn store_to_db(row_data: Vec<RowData>) -> Result<(), Box<dyn std::error::Error>> {
-    let connection = sqlite::open("magneti_db.sqlite3")?;
-    connection.execute("
-        CREATE TABLE IF NOT EXISTS data (
-            id INTEGER PRIMARY KEY,
-            material INTEGER NOT NULL,
-            naziv_materiala TEXT,
-            zaloga REAL,
-            poraba REAL,
-            odprta_narocila REAL,
-            nabavnik TEXT,
-            min_kolicina REAL,
-            pakiranje REAL,
-            dobavni_rok REAL
-        );
-    ")?;
-
-
-    let mut statement = connection.prepare("
-        INSERT INTO data (material, naziv_materiala, zaloga, poraba, odprta_narocila) VALUES (?, ?, ?, ?, ?)
-    ")?;
-    for row in row_data {
-        statement.bind((1, row.material))?;
-        statement.bind(&[(2, row.naziv_materiala.as_str())][..])?;
-        statement.bind((3, row.zaloga))?;
-        statement.bind((4, row.poraba))?;
-        statement.bind((5, row.odprta_narocila))?;
-        statement.next()?;
-        statement.reset()?;
-    }
-
-    Ok(())
-}
-
-
-#[derive(Default, Debug)]
-struct RowData {
-    material: i64, // zaloga
-    naziv_materiala: String, // poraba
-    zaloga: f64, // zaloga
-    poraba: f64,
-    odprta_narocila: f64,
-}
-
-
-
-fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
-    if files.len() != 3 {
-        MessageDialog::new()
-            .set_title("Napaka, nepravilno število datotek != 3")
-            .set_level(MessageLevel::Error)
-            .show();
-    }
-
-
-    let poraba_file = files.iter().find(|&path_buf| {
-        path_buf.file_name().unwrap() == "PORABA.XLSX"
-    }).ok_or("File PORABA.XLSX not found")?;
-
-    let mut workbook = open_workbook_auto(poraba_file)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
-    let mut material_map: HashMap<i64, (String, f64)> = HashMap::new();
-    for row in range.rows().skip(1) {
-        let material = row.get(1)
-            .and_then(DataType::get_string)
-            .map(|f| f.parse::<i64>().unwrap_or(0))
-            .unwrap_or(0);
-        if material == 0 { continue; }
-
-        let opis_materiala = row.get(2)
-            .and_then(DataType::get_string)
-            .unwrap_or("");
-
-        let klc_v_em_vnosa = row.get(9)
-            .and_then(DataType::get_float)
-            .map(|f| f)
-            .unwrap_or(0.);
-
-        let entry = material_map
-            .entry(material)
-            .or_insert((opis_materiala.to_string(), 0.0));
-
-        (*entry).1 += klc_v_em_vnosa;
-    }
-
-    let odprta_narocila_file = files.iter().find(|&path_buf| {
-        path_buf.file_name().unwrap() == "ODPRTA NAROČILA.XLSX"
-    }).ok_or("File PORABA:XLSX not found")?;
-    let mut workbook = open_workbook_auto(odprta_narocila_file)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
-    let mut dobava_map: HashMap<i64, f64> = HashMap::new();
-    for row in range.rows().skip(1) {
-        let material = row.get(0)
-            .and_then(DataType::get_string)
-            .map(|f| f.parse::<i64>().unwrap_or(0))
-            .unwrap_or(0);
-        if material == 0 { continue; }
-
-
-
-        let se_za_dobavo = row.get(23)
-            .and_then(DataType::get_float)
-            .map(|f| f)
-            .unwrap_or(0.);
-
-        let entry = dobava_map
-            .entry(material)
-            .or_insert(0.);
-
-        *entry += se_za_dobavo;
-    }
-
-
-    let zaloga_file = files.iter().find(|&path_buf| {
-        path_buf.file_name().unwrap() == "ZALOGA.XLSX"
-    }).ok_or("File PORABA:XLSX not found")?;
-    let mut workbook = open_workbook_auto(zaloga_file)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
-    let mut row_data: Vec<RowData> = Vec::with_capacity(100);
-    for row in range.rows().skip(1) {
-        let material = row.get(1)
-            .and_then(DataType::get_string)
-            .map(|f| f.parse::<i64>().unwrap_or(0))
-            .unwrap_or(0);
-        if material == 0 { continue; }
-
-        let zaloga = row.get(7)
-            .and_then(DataType::get_float)
-            .map(|f| f)
-            .unwrap_or(0.);
-
-        let emtpy_entry = ("".to_string(), 0.);
-        let entry = material_map.get(&material).unwrap_or(&emtpy_entry);
-        let opis_materiala = entry.0.clone();
-        let poraba = entry.1.abs() / 12.;
-        let odprta_narocila = *dobava_map.get(&material).unwrap_or(&0.);
-
-
-        row_data.push(RowData {
-            material,
-            naziv_materiala: opis_materiala,
-            zaloga,
-            poraba,
-            odprta_narocila
-        });
-    }
-
-
-    Ok(row_data)
-}
-
-
 
 fn main() {
 
     eframe::run_native(
-        "Konstil Excel",
+        "Magneti Excel",
         NativeOptions::default(),
         Box::new(|cc| Ok(Box::new(App::new(cc))))
     ).unwrap();

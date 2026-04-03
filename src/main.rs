@@ -3,6 +3,7 @@
 mod parse;
 mod db;
 
+use std::time::{Duration, Instant};
 use eframe::{NativeOptions};
 use eframe::egui::*;
 use egui_extras::{Column, TableBuilder};
@@ -21,6 +22,7 @@ struct App {
     successfully_loaded_query: Option<bool>,
 
     successfully_exported: Option<bool>,
+    export_counter: Option<Instant>,
 
     opomba_material: String,
     opomba_opomba: String,
@@ -90,7 +92,7 @@ impl App {
             successfully_loaded_query,
 
             successfully_exported: None,
-
+            export_counter: None,
 
             opomba_material: String::new(),
             opomba_opomba: String::new(),
@@ -332,7 +334,7 @@ impl eframe::App for App {
                         let mut resp: Result<(), Box<dyn std::error::Error>> = Ok(());
 
                         let _ = self.row_data.as_ref().map(|d| { resp = export_filtered_to_excel(&self.apply_filters(&d)); });
-
+                        self.export_counter = Some(Instant::now());
                         match resp {
                             Err(err) => {
                                 println!("export error: {:?}", err);
@@ -344,12 +346,14 @@ impl eframe::App for App {
                         }
                     }
 
-                    if self.successfully_exported.is_some() {
+                    if self.successfully_exported.is_some() && self.export_counter.is_some_and(|start| start.elapsed() < Duration::from_secs(3)){
                         if self.successfully_exported.unwrap() {
                             ui.colored_label(Color32::GREEN, "Izvozil!");
                         } else {
                             ui.colored_label(Color32::GREEN, "Napaka!");
                         }
+                    } else {
+                        self.export_counter = None;
                     }
                 });
 

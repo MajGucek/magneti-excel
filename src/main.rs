@@ -326,7 +326,7 @@ impl eframe::App for App {
                         }
                     }
                 }
-                
+
                 ui.horizontal(|ui| {
                     if ui.button("Izvozi").clicked() {
                         let mut resp: Result<(), Box<dyn std::error::Error>> = Ok(());
@@ -335,6 +335,7 @@ impl eframe::App for App {
 
                         match resp {
                             Err(err) => {
+                                println!("export error: {:?}", err);
                                 self.successfully_exported = Some(false);
                             },
                             Ok(_) => {
@@ -351,10 +352,10 @@ impl eframe::App for App {
                         }
                     }
                 });
-                
+
             });
 
-            
+
 
             ui.add_space(4.0);
 

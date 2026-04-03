@@ -29,6 +29,11 @@ struct App {
     successfully_stored_dobavni_rok: Option<bool>,
 
     /* --Filters-- */
+    filter_rdeca: bool,
+    filter_oranzna: bool,
+    filter_rumena: bool,
+    filter_modra: bool,
+
     filter_sifra_materiala: String,
     filter_naziv_materiala: String,
     filter_nabavnik: String,
@@ -49,6 +54,11 @@ impl App {
     pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Self {
         cc.egui_ctx.send_viewport_cmd(ViewportCommand::Maximized(true));
         cc.egui_ctx.set_visuals(Visuals::light());
+
+        cc.egui_ctx.style_mut(|s| {
+           s.override_text_style = Some(TextStyle::Heading);
+            s.visuals.override_text_color = Some(Color32::from_rgb(5, 5, 5));
+        });
 
         let mut row_data = None;
         let db_manager = DBManager { db_name: "magneti_db.sqlite3".to_string() };
@@ -85,6 +95,12 @@ impl App {
             dobavni_rok_dobavni_rok: String::new(),
             successfully_stored_dobavni_rok: None,
 
+            filter_rdeca: false,
+            filter_oranzna: false,
+            filter_rumena: false,
+            filter_modra: false,
+
+
             filter_sifra_materiala: String::new(),
             filter_naziv_materiala: String::new(),
             filter_nabavnik: String::new(),
@@ -115,7 +131,16 @@ impl App {
                     (!self.filter_zaloga_vecja || row.zaloga.is_some_and(|zal| zal > self.filter_zaloga_gt.parse().unwrap_or(0.))) &&
                     (!self.filter_poraba_vecja || row.poraba.is_some_and(|por| por > self.filter_poraba_gt.parse().unwrap_or(0.))) &&
                     (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > self.filter_odprta_narocila_gt.parse().unwrap_or(0.))) &&
-                    (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > self.filter_dobavni_rok_gt.parse().unwrap_or(0.)))
+                    (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > self.filter_dobavni_rok_gt.parse().unwrap_or(0.))) &&
+                    (!self.filter_rumena || (!row.dobavni_rok.is_none() && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
+                        row.odprta_narocila.is_some_and(|v| v == 0.))) &&
+                    (!self.filter_oranzna || (!row.dobavni_rok.is_none() && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 &&
+                        row.odprta_narocila.is_some_and(|v| v == 0.))) &&
+                    (!self.filter_rdeca || (!row.dobavni_rok.is_none() && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.5 &&
+                        row.odprta_narocila.is_some_and(|v| v == 0.))) &&
+                    (!self.filter_modra || (!row.dobavni_rok.is_none() && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
+                        row.odprta_narocila.is_some_and(|v| v != 0.)))
+
 
         })
             .cloned()
@@ -166,28 +191,24 @@ impl App {
                         if !row.dobavni_rok.is_none() {
                             if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
                                 row.odprta_narocila.is_some_and(|v| v != 0.) {
-                                // light blue
                                 row_color = Color32::LIGHT_BLUE;
                             }
 
                             if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
                                 row.odprta_narocila.is_some_and(|v| v == 0.) {
-                                // light yellow
-
-                                row_color = Color32::LIGHT_YELLOW;
+                                row_color = Color32::YELLOW;
                             }
 
-                            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1. &&
+                            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 &&
                                 row.odprta_narocila.is_some_and(|v| v == 0.) {
-                                // light red
-                                row_color = Color32::LIGHT_RED;
+                                row_color = Color32::ORANGE;
+                            }
+
+                            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.5 &&
+                                row.odprta_narocila.is_some_and(|v| v == 0.) {
+                                row_color = Color32::RED;
                             }
                         }
-
-
-
-
-
 
 
                         table_row.col(|ui| {
@@ -321,7 +342,7 @@ impl eframe::App for App {
             .order(Order::Middle)
             .default_size(vec2(300., 400.))
             .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
+                ui.vertical(|ui| {
                     ui.add(
                         TextEdit::singleline(&mut self.filter_sifra_materiala)
                             .hint_text("Iskanje po šifri materiala...")
@@ -367,6 +388,12 @@ impl eframe::App for App {
                         );
                     });
 
+                    ui.checkbox(&mut self.filter_rumena, "Rumeni");
+                    ui.checkbox(&mut self.filter_oranzna, "Oranžni");
+                    ui.checkbox(&mut self.filter_rdeca, "Rdeči");
+                    ui.checkbox(&mut self.filter_modra, "Modri");
+
+
                     let reset = ui.button("Ponastavi filtre");
                     if reset.clicked() {
                         self.filter_sifra_materiala = String::new();
@@ -383,6 +410,11 @@ impl eframe::App for App {
 
                         self.filter_dobavni_rok = false;
                         self.filter_dobavni_rok_gt = String::from("0");
+
+                        self.filter_rumena = false;
+                        self.filter_oranzna = false;
+                        self.filter_rdeca = false;
+                        self.filter_modra = false;
                     }
 
 
@@ -652,7 +684,7 @@ pub fn export_filtered_to_excel(
     worksheet.write_string(0, 9, "Zaloga SAP in odprto")?;
     worksheet.write_string(0, 10, "Opomba")?;
 
-    
+
     for (row_idx, item) in data.iter().enumerate() {
         let row = (row_idx + 1) as u32;
 

@@ -150,36 +150,3 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
 
     Ok(row_data)
 }
-
-
-#[derive(Default, Debug)]
-pub struct ExtraConfigRow {
-    pub material: i64,
-    pub dobavni_rok: f64,
-}
-pub fn parse_extra_config_files(path: PathBuf) -> Result<Vec<ExtraConfigRow>, Box<dyn std::error::Error>> {
-    let mut workbook = open_workbook_auto(path)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
-    let mut row_data = Vec::with_capacity(100);
-    for row in range.rows().skip(1) {
-        println!("{:?}", row);
-        let material = row.get(0)
-            .and_then(DataType::get_float)
-            .map(|f| f as i64)
-            .unwrap_or(0);
-
-        let dobavni_rok = row.get(1)
-            .and_then(DataType::get_float)
-            .unwrap_or(0.);
-
-        let extra_config_row = ExtraConfigRow {
-            material,
-            dobavni_rok,
-        };
-        println!("{:?}", &extra_config_row);
-
-        row_data.push(extra_config_row);
-    }
-
-    Ok(row_data)
-}

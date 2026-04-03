@@ -1,51 +1,72 @@
-use sqlite::{Connection, Row, State};
-use crate::parse::{ExtraConfigRow, RowData, SifrantRow};
+use sqlite::{Connection, State};
+use crate::parse::{RowData, SifrantRow};
 
 pub struct DBManager {
     pub db_name: String
 }
 
 impl DBManager {
+    pub fn try_create_tables(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_data_table(&connection)?;
+        self.create_sifrant_table(&connection)?;
+        self.create_opomba_table(&connection)?;
+        self.create_dobavni_rok_table(&connection)?;
+
+        Ok(())
+    }
+
+
     pub fn get_data(&self) -> Result<Vec<ViewQuery>, Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
         ViewQuery::query(&connection)
     }
 
 
-    pub fn store_to_db(&self, row_data: Vec<RowData>) -> Result<(), Box<dyn std::error::Error>> {
-        let connection = sqlite::open(self.db_name.as_str())?;
+    fn create_data_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
         connection.execute("
-        CREATE TABLE IF NOT EXISTS data (
-            material INTEGER PRIMARY KEY,
-            zaloga REAL,
-            poraba REAL,
-            odprta_narocila REAL,
-            trenutna_zaloga_zadostuje_za_mesecev REAL
-                GENERATED ALWAYS AS (
-                    CASE
-                        WHEN poraba = 0 THEN NULL
-                        ELSE zaloga / poraba
-                    END
-                ) VIRTUAL,
-            trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev REAL
-                GENERATED ALWAYS AS (
-                    CASE
-                        WHEN poraba = 0 THEN NULL
-                        ELSE (zaloga + odprta_narocila) / poraba
-                    END
-                ) VIRTUAL,
+            CREATE TABLE IF NOT EXISTS data (
+                material INTEGER PRIMARY KEY,
+                zaloga REAL,
+                poraba REAL,
+                odprta_narocila REAL,
+                trenutna_zaloga_zadostuje_za_mesecev REAL
+                    GENERATED ALWAYS AS (
+                        CASE
+                            WHEN poraba = 0 THEN NULL
+                            ELSE zaloga / poraba
+                        END
+                    ) VIRTUAL,
+                trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev REAL
+                    GENERATED ALWAYS AS (
+                        CASE
+                            WHEN poraba = 0 THEN NULL
+                            ELSE (zaloga + odprta_narocila) / poraba
+                        END
+                    ) VIRTUAL,
 
-            FOREIGN KEY(material) REFERENCES sifrant(material)
-        );
-    ")?;
+                FOREIGN KEY(material) REFERENCES sifrant(material)
+            );
+        ")?;
         connection.execute("CREATE INDEX IF NOT EXISTS idx_data_material ON data(material);")?;
 
+
+        connection.execute("COMMIT")?;
+        Ok(())
+    }
+
+
+    pub fn store_to_data(&self, row_data: Vec<RowData>) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_data_table(&connection)?;
+
         let mut statement = connection.prepare("
-        INSERT INTO data (material, zaloga, poraba, odprta_narocila) VALUES (?, ?, ?, ?) ON CONFLICT(material) DO UPDATE SET
-            zaloga = excluded.zaloga,
-            poraba = excluded.poraba,
-            odprta_narocila = excluded.odprta_narocila
-    ")?;
+            INSERT INTO data (material, zaloga, poraba, odprta_narocila) VALUES (?, ?, ?, ?) ON CONFLICT(material) DO UPDATE SET
+                zaloga = excluded.zaloga,
+                poraba = excluded.poraba,
+                odprta_narocila = excluded.odprta_narocila
+        ")?;
         connection.execute("BEGIN TRANSACTION")?;
         for (i, row) in row_data.iter().enumerate() {
             println!("{}, INSERTING DATA!", i);
@@ -63,23 +84,29 @@ impl DBManager {
     }
 
 
+    fn create_sifrant_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS sifrant (
+                material INTEGER PRIMARY KEY ,
+                naziv_materiala TEXT,
+                nabavna_skupina TEXT,
+                mrp_karakteristika TEXT
+            );
+        ")?;
+
+
+        connection.execute("COMMIT")?;
+        Ok(())
+    }
+
     pub fn store_sifrant_to_db(&self, rows: Vec<SifrantRow>) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
-        connection.execute("
-        CREATE TABLE IF NOT EXISTS sifrant (
-            material INTEGER PRIMARY KEY ,
-            naziv_materiala TEXT,
-            nabavna_skupina TEXT,
-            mrp_karakteristika TEXT
-        );
-    ")?;
-
-
-
+        self.create_sifrant_table(&connection)?;
 
         let mut statement = connection.prepare("
-        INSERT INTO sifrant (material, naziv_materiala, nabavna_skupina, mrp_karakteristika) VALUES (?, ?, ?, ?)
-    ")?;
+            INSERT INTO sifrant (material, naziv_materiala, nabavna_skupina, mrp_karakteristika) VALUES (?, ?, ?, ?)
+        ")?;
 
         connection.execute("BEGIN TRANSACTION")?;
         for (index, sifrant_row) in rows.iter().enumerate() {
@@ -98,22 +125,29 @@ impl DBManager {
         Ok(())
     }
 
-    pub fn store_opomba_to_db(&self, opomba: (i64, String)) -> Result<(), Box<dyn std::error::Error>> {
-        let connection = sqlite::open(self.db_name.as_str())?;
-        connection.execute("
-        CREATE TABLE IF NOT EXISTS opombe (
-            material INTEGER PRIMARY KEY ,
-            opomba TEXT NOT NULL,
-            FOREIGN KEY(material) REFERENCES sifrant(material)
-        );
-    ")?;
 
+    fn create_opomba_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS opombe (
+                material INTEGER PRIMARY KEY ,
+                opomba TEXT NOT NULL,
+                FOREIGN KEY(material) REFERENCES sifrant(material)
+            );
+        ")?;
         connection.execute("CREATE INDEX IF NOT EXISTS idx_opombe_material ON opombe(material);")?;
 
+        connection.execute("COMMIT")?;
+        Ok(())
+    }
+
+    pub fn store_opomba_to_db(&self, opomba: (i64, String)) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_opomba_table(&connection)?;
 
         let mut statement = connection.prepare("
-        INSERT INTO opombe (material, opomba) VALUES (?, ?) ON CONFLICT(material) DO UPDATE SET opomba = excluded.opomba
-    ")?;
+            INSERT INTO opombe (material, opomba) VALUES (?, ?) ON CONFLICT(material) DO UPDATE SET opomba = excluded.opomba
+        ")?;
         connection.execute("BEGIN TRANSACTION")?;
         statement.bind((1, opomba.0))?;
         statement.bind((2, opomba.1.as_str()))?;
@@ -125,34 +159,51 @@ impl DBManager {
         Ok(())
     }
 
-    pub fn store_extra_config_to_db(&self, extra_config_rows: Vec<ExtraConfigRow>) -> Result<(), Box<dyn std::error::Error>> {
-        let connection = sqlite::open(self.db_name.as_str())?;
+
+    fn create_dobavni_rok_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
         connection.execute("
-        CREATE TABLE IF NOT EXISTS config (
-            material INTEGER PRIMARY KEY,
-            dobavni_rok REAL NOT NULL,
-            FOREIGN KEY(material) REFERENCES sifrant(material)
-        );
-    ")?;
+            CREATE TABLE IF NOT EXISTS dobavni_roki (
+                material INTEGER PRIMARY KEY,
+                dobavni_rok REAL NOT NULL,
+                FOREIGN KEY(material) REFERENCES sifrant(material)
+            );
+        ")?;
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_dobavni_roki_material ON dobavni_roki(material);")?;
 
-        connection.execute("CREATE INDEX IF NOT EXISTS idx_config_material ON config(material);")?;
+        connection.execute("COMMIT")?;
+        Ok(())
+    }
 
+    pub fn store_dobavni_rok(&self, dobavni_rok_row: (i64, f64)) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_dobavni_rok_table(&connection)?;
 
         let mut statement = connection.prepare("
-        INSERT INTO config (material, dobavni_rok) VALUES (?, ?)
+        INSERT INTO dobavni_roki (material, dobavni_rok) VALUES (?, ?) ON CONFLICT(material) DO UPDATE SET dobavni_rok = excluded.dobavni_rok
     ")?;
         connection.execute("BEGIN TRANSACTION")?;
-        for (index, extra_config_row) in extra_config_rows.iter().enumerate() {
-            println!("{}", index);
-            statement.bind((1, extra_config_row.material))?;
-            statement.bind((2, extra_config_row.dobavni_rok))?;
-            statement.next()?;
-            statement.reset()?;
-        }
+        statement.bind((1, dobavni_rok_row.0))?;
+        statement.bind((2, dobavni_rok_row.1))?;
+        statement.next()?;
         connection.execute("COMMIT")?;
 
 
         self.try_create_view(&connection);
+        Ok(())
+    }
+
+    pub fn drop_all_tables(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            DROP TABLE data;
+        ")?;
+        connection.execute("
+            DROP TABLE sifrant;
+        ")?;
+
+        connection.execute("COMMIT")?;
         Ok(())
     }
 
@@ -174,7 +225,7 @@ impl DBManager {
             o.opomba
         FROM sifrant s
         LEFT JOIN data d ON s.material = d.material
-        LEFT JOIN config c ON s.material = c.material
+        LEFT JOIN dobavni_roki c ON s.material = c.material
         LEFT JOIN opombe o ON s.material = o.material;
     ");
     }

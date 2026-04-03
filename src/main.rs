@@ -20,6 +20,8 @@ struct App {
     row_data: Option<Vec<ViewQuery>>,
     successfully_loaded_query: Option<bool>,
 
+    successfully_exported: Option<bool>,
+
     opomba_material: String,
     opomba_opomba: String,
     successfully_stored_opomba: Option<bool>,
@@ -87,6 +89,9 @@ impl App {
             row_data,
             successfully_loaded_query,
 
+            successfully_exported: None,
+
+
             opomba_material: String::new(),
             opomba_opomba: String::new(),
             successfully_stored_opomba: None,
@@ -132,13 +137,17 @@ impl App {
                     (!self.filter_poraba_vecja || row.poraba.is_some_and(|por| por > parse_string_to_f64(self.filter_poraba_gt.as_str()))) &&
                     (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > parse_string_to_f64(self.filter_odprta_narocila_gt.as_str()))) &&
                     (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > parse_string_to_f64(self.filter_dobavni_rok_gt.as_str()))) &&
-                    (!self.filter_rumena || (!row.dobavni_rok.is_none() && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
+                    (!self.filter_rumena || (!row.dobavni_rok.is_none() &&
+                        (row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) >= 1.5) &&
                         row.odprta_narocila.is_some_and(|v| v == 0.))) &&
-                    (!self.filter_oranzna || (!row.dobavni_rok.is_none() && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 &&
+                    (!self.filter_oranzna || (!row.dobavni_rok.is_none() &&
+                        (row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) >= 0.5) &&
                         row.odprta_narocila.is_some_and(|v| v == 0.))) &&
-                    (!self.filter_rdeca || (!row.dobavni_rok.is_none() && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.5 &&
+                    (!self.filter_rdeca || (!row.dobavni_rok.is_none() &&
+                        row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.5 &&
                         row.odprta_narocila.is_some_and(|v| v == 0.))) &&
-                    (!self.filter_modra || (!row.dobavni_rok.is_none() && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
+                    (!self.filter_modra || (!row.dobavni_rok.is_none() &&
+                        row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
                         row.odprta_narocila.is_some_and(|v| v != 0.)))
 
 
@@ -317,14 +326,35 @@ impl eframe::App for App {
                         }
                     }
                 }
+                
+                ui.horizontal(|ui| {
+                    if ui.button("Izvozi").clicked() {
+                        let mut resp: Result<(), Box<dyn std::error::Error>> = Ok(());
 
-                if ui.button("Izvozi").clicked() {
-                    let _ = self.row_data.as_ref().map(|d| export_filtered_to_excel(&self.apply_filters(&d)));
+                        let _ = self.row_data.as_ref().map(|d| { resp = export_filtered_to_excel(&self.apply_filters(&d)); });
 
-                }
+                        match resp {
+                            Err(err) => {
+                                self.successfully_exported = Some(false);
+                            },
+                            Ok(_) => {
+                                self.successfully_exported = Some(true);
+                            }
+                        }
+                    }
 
-
+                    if self.successfully_exported.is_some() {
+                        if self.successfully_exported.unwrap() {
+                            ui.colored_label(Color32::GREEN, "Izvozil!");
+                        } else {
+                            ui.colored_label(Color32::GREEN, "Napaka!");
+                        }
+                    }
+                });
+                
             });
+
+            
 
             ui.add_space(4.0);
 
@@ -672,16 +702,18 @@ pub fn export_filtered_to_excel(
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
 
+
+
     worksheet.write_string(0, 0, "Material")?;
     worksheet.write_string(0, 1, "Naziv")?;
     worksheet.write_string(0, 2, "Nabavnik")?;
     worksheet.write_string(0, 3, "MRP")?;
     worksheet.write_string(0, 4, "Zaloga")?;
-    worksheet.write_string(0, 5, "Poraba")?;
-    worksheet.write_string(0, 6, "Odprto")?;
-    worksheet.write_string(0, 7, "Dobava")?;
-    worksheet.write_string(0, 8, "Zaloga SAP")?;
-    worksheet.write_string(0, 9, "Zaloga SAP in odprto")?;
+    worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnjih 12 mesecev")?;
+    worksheet.write_string(0, 6, "Odprto, Odprta naročila dobaviteljem")?;
+    worksheet.write_string(0, 7, "Dobava, Predviden dobavni rok v mesecih")?;
+    worksheet.write_string(0, 8, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za mesecev")?;
+    worksheet.write_string(0, 9, "Zaloga SAP in odprto, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za mesecev")?;
     worksheet.write_string(0, 10, "Opomba")?;
 
 

@@ -128,10 +128,10 @@ impl App {
                 format!("{}", row.material).contains(self.filter_sifra_materiala.as_str()) &&
                     row.naziv_materiala.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_naziv_materiala.to_lowercase().as_str())) &&
                     row.nabavna_skupina.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_nabavnik.to_lowercase().as_str())) &&
-                    (!self.filter_zaloga_vecja || row.zaloga.is_some_and(|zal| zal > self.filter_zaloga_gt.parse().unwrap_or(0.))) &&
-                    (!self.filter_poraba_vecja || row.poraba.is_some_and(|por| por > self.filter_poraba_gt.parse().unwrap_or(0.))) &&
-                    (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > self.filter_odprta_narocila_gt.parse().unwrap_or(0.))) &&
-                    (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > self.filter_dobavni_rok_gt.parse().unwrap_or(0.))) &&
+                    (!self.filter_zaloga_vecja || row.zaloga.is_some_and(|zal| zal > parse_string_to_f64(self.filter_zaloga_gt.as_str()))) &&
+                    (!self.filter_poraba_vecja || row.poraba.is_some_and(|por| por > parse_string_to_f64(self.filter_poraba_gt.as_str()))) &&
+                    (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > parse_string_to_f64(self.filter_odprta_narocila_gt.as_str()))) &&
+                    (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > parse_string_to_f64(self.filter_dobavni_rok_gt.as_str()))) &&
                     (!self.filter_rumena || (!row.dobavni_rok.is_none() && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
                         row.odprta_narocila.is_some_and(|v| v == 0.))) &&
                     (!self.filter_oranzna || (!row.dobavni_rok.is_none() && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 &&
@@ -444,7 +444,7 @@ impl eframe::App for App {
                     if dobavni_rok.clicked() {
                         let resp = self.db_manager.store_dobavni_rok((
                             self.dobavni_rok_material.parse().unwrap_or(0),
-                            self.dobavni_rok_dobavni_rok.parse().unwrap_or(0.),
+                            parse_string_to_f64(self.dobavni_rok_dobavni_rok.as_str()),
                         ));
                         match resp {
                             Err(err) => {
@@ -743,6 +743,11 @@ pub fn export_filtered_to_excel(
 
     workbook.save("Analitika.xlsx")?;
     Ok(())
+}
+
+
+fn parse_string_to_f64(s: &str) -> f64 {
+    s.replace(",", ".").parse().unwrap_or(0.)
 }
 
 fn main() {

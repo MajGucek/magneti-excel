@@ -44,6 +44,9 @@ struct App {
     filter_zaloga_vecja: bool,
     filter_zaloga_gt: String,
 
+    filter_nabavnik_definiran: bool,
+    filter_nabavnik_ni_definiran: bool,
+
     filter_poraba_vecja: bool,
     filter_poraba_gt: String,
 
@@ -114,6 +117,9 @@ impl App {
             filter_zaloga_vecja: true,
             filter_zaloga_gt: String::from("0"),
 
+            filter_nabavnik_definiran: true,
+            filter_nabavnik_ni_definiran: false,
+
             filter_poraba_vecja: true,
             filter_poraba_gt: String::from("0"),
 
@@ -147,14 +153,30 @@ impl App {
                 }
                 // ---- //
 
+                let condition = if self.filter_zaloga_vecja && self.filter_poraba_vecja {
+                    // both are checked then OR
+                    row.zaloga.is_some_and(|zal| zal > parse_string_to_f64(self.filter_zaloga_gt.as_str())) ||
+                        row.poraba.is_some_and(|por| por > parse_string_to_f64(self.filter_poraba_gt.as_str()))
+                } else if self.filter_zaloga_vecja && !self.filter_poraba_vecja {
+                    row.zaloga.is_some_and(|zal| zal > parse_string_to_f64(self.filter_zaloga_gt.as_str()))
+                } else if !self.filter_zaloga_vecja && self.filter_poraba_vecja {
+                    row.poraba.is_some_and(|por| por > parse_string_to_f64(self.filter_poraba_gt.as_str()))
+                } else {
+                    true
+                };
+
+
                 format!("{}", row.material).contains(self.filter_sifra_materiala.as_str()) &&
                     row.naziv_materiala.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_naziv_materiala.to_lowercase().as_str())) &&
                     row.nabavna_skupina.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_nabavnik.to_lowercase().as_str())) &&
-                    (!self.filter_zaloga_vecja || row.zaloga.is_some_and(|zal| zal > parse_string_to_f64(self.filter_zaloga_gt.as_str()))) &&
-                    (!self.filter_poraba_vecja || row.poraba.is_some_and(|por| por > parse_string_to_f64(self.filter_poraba_gt.as_str()))) &&
+
+                    condition &&
+
                     (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > parse_string_to_f64(self.filter_odprta_narocila_gt.as_str()))) &&
                     (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > parse_string_to_f64(self.filter_dobavni_rok_gt.as_str()))) &&
-                    (color_matches || !any_color_filter_active)
+                    (color_matches || !any_color_filter_active) &&
+                    (!self.filter_nabavnik_ni_definiran || row.nabavna_skupina.as_ref().is_some_and(|str| str.eq(""))) &&
+                    (!self.filter_nabavnik_definiran || !row.nabavna_skupina.as_ref().is_some_and(|str| str.eq("")))
         })
             .cloned()
             .collect()
@@ -163,13 +185,7 @@ impl App {
     }
 
 
-    pub fn render_table(&self, ui: &mut Ui) {
-        let data = match &self.row_data {
-            Some(d) => self.apply_filters(d),
-            None => return,
-        };
-
-
+    pub fn render_table(&self, ui: &mut Ui, data: &Vec<ViewQuery>) {
         let number_width = 100.;
         let string_width = 550.;
 
@@ -178,6 +194,7 @@ impl App {
             TableBuilder::new(ui)
                 .striped(true)
                 .cell_layout(Layout::left_to_right(Align::Center))
+                //.columns(Column::exact(number_width), 1)
                 .columns(Column::exact(number_width), 1) // Material
                 .columns(Column::exact(string_width * 0.6), 1) // Naziv materiala
                 .columns(Column::exact(number_width), 2) // nabavna_skupina, mrp_karakteristika
@@ -199,8 +216,9 @@ impl App {
                 })
                 .body(|body| {
                     body.rows(25., data.len(), |mut table_row| {
+                        let index = table_row.index().clone();
 
-                        let row = &data[table_row.index()];
+                        let row = &data[index];
 
                         let mut row_color = Color32::TRANSPARENT;
                         if !row.dobavni_rok.is_none() {
@@ -229,8 +247,13 @@ impl App {
                             }
                         }
 
+                        /*
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            ui.label(format!("{}", index + 1));
+                        });
 
-
+                         */
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
@@ -371,12 +394,19 @@ impl eframe::App for App {
 
             });
 
+            println!("Before filters: {}", self.row_data.as_ref().unwrap_or(&Vec::new()).len());
+            let data = match &self.row_data {
+                Some(d) => self.apply_filters(d),
+                None => Vec::new(),
+            };
 
+
+            ui.label(format!("Število zadetkov: {}", &data.len()));
 
             ui.add_space(4.0);
 
             ScrollArea::vertical().show(ui, |ui| {
-                self.render_table(ui);
+                self.render_table(ui, &data);
             });
         });
 
@@ -419,6 +449,16 @@ impl eframe::App for App {
                         );
                     });
 
+
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.filter_nabavnik_definiran, "Nabavnik je definiran");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.filter_nabavnik_ni_definiran, "Nabavnik ni definiran");
+                    });
+
+
+
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut self.filter_odprta_narocila, "odprta naročila večja kot");
                         ui.add(
@@ -451,6 +491,9 @@ impl eframe::App for App {
 
                         self.filter_poraba_vecja = true;
                         self.filter_poraba_gt = String::from("0");
+
+                        self.filter_nabavnik_definiran = true;
+                        self.filter_nabavnik_ni_definiran = false;
 
                         self.filter_odprta_narocila = false;
                         self.filter_odprta_narocila_gt = String::from("0");

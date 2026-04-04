@@ -36,7 +36,7 @@ struct App {
     filter_rdeca: bool,
     filter_oranzna: bool,
     filter_rumena: bool,
-    filter_modra: bool,
+    filter_modra_zelena: bool,
 
     filter_sifra_materiala: String,
     filter_naziv_materiala: String,
@@ -105,7 +105,7 @@ impl App {
             filter_rdeca: false,
             filter_oranzna: false,
             filter_rumena: false,
-            filter_modra: false,
+            filter_modra_zelena: false,
 
 
             filter_sifra_materiala: String::new(),
@@ -130,8 +130,23 @@ impl App {
 
 impl App {
     fn apply_filters(&self, rows: &Vec<ViewQuery>) -> Vec<ViewQuery> {
+
         rows.iter()
             .filter(|&row| {
+                // --Evil GPT hacked-- //
+                let any_color_filter_active = self.filter_rumena || self.filter_oranzna || self.filter_rdeca || self.filter_modra_zelena;
+                let mut color_matches = false;
+                if any_color_filter_active {
+                    let months_left = row.dobavni_rok.map_or(0., |dr| row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - dr);
+                    let no_open_orders = row.odprta_narocila.is_some_and(|v| v == 0.);
+
+                    color_matches |= self.filter_rumena && row.dobavni_rok.is_some() && months_left >= 1.5 && months_left < 3. && no_open_orders;
+                    color_matches |= self.filter_oranzna && row.dobavni_rok.is_some() && months_left >= 0.5 && months_left < 1.5 && no_open_orders;
+                    color_matches |= self.filter_rdeca && row.dobavni_rok.is_some() && months_left < 0.5 && no_open_orders;
+                    color_matches |= self.filter_modra_zelena && row.dobavni_rok.is_some() && !no_open_orders;  // has open orders
+                }
+                // ---- //
+
                 format!("{}", row.material).contains(self.filter_sifra_materiala.as_str()) &&
                     row.naziv_materiala.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_naziv_materiala.to_lowercase().as_str())) &&
                     row.nabavna_skupina.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_nabavnik.to_lowercase().as_str())) &&
@@ -139,20 +154,7 @@ impl App {
                     (!self.filter_poraba_vecja || row.poraba.is_some_and(|por| por > parse_string_to_f64(self.filter_poraba_gt.as_str()))) &&
                     (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > parse_string_to_f64(self.filter_odprta_narocila_gt.as_str()))) &&
                     (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > parse_string_to_f64(self.filter_dobavni_rok_gt.as_str()))) &&
-                    (!self.filter_rumena || (!row.dobavni_rok.is_none() &&
-                        (row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) >= 1.5) &&
-                        row.odprta_narocila.is_some_and(|v| v == 0.))) &&
-                    (!self.filter_oranzna || (!row.dobavni_rok.is_none() &&
-                        (row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 && row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) >= 0.5) &&
-                        row.odprta_narocila.is_some_and(|v| v == 0.))) &&
-                    (!self.filter_rdeca || (!row.dobavni_rok.is_none() &&
-                        row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.5 &&
-                        row.odprta_narocila.is_some_and(|v| v == 0.))) &&
-                    (!self.filter_modra || (!row.dobavni_rok.is_none() &&
-                        row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
-                        row.odprta_narocila.is_some_and(|v| v != 0.)))
-
-
+                    (color_matches || !any_color_filter_active)
         })
             .cloned()
             .collect()
@@ -172,6 +174,7 @@ impl App {
         let string_width = 550.;
 
         ScrollArea::both().show(ui, |ui| {
+            ui.style_mut().visuals.faint_bg_color = Color32::from_rgb(200, 200, 200);
             TableBuilder::new(ui)
                 .striped(true)
                 .cell_layout(Layout::left_to_right(Align::Center))
@@ -196,14 +199,19 @@ impl App {
                 })
                 .body(|body| {
                     body.rows(25., data.len(), |mut table_row| {
+
                         let row = &data[table_row.index()];
 
                         let mut row_color = Color32::TRANSPARENT;
                         if !row.dobavni_rok.is_none() {
-                            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
-                                row.odprta_narocila.is_some_and(|v| v != 0.) {
-                                row_color = Color32::LIGHT_BLUE;
+                            if row.odprta_narocila.is_some_and(|v| v != 0.) {
+                                if row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.) <= row.dobavni_rok.unwrap_or(0.) {
+                                    row_color = Color32::LIGHT_BLUE;
+                                } else {
+                                    row_color = Color32::GREEN;
+                                }
                             }
+
 
                             if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
                                 row.odprta_narocila.is_some_and(|v| v == 0.) {
@@ -220,6 +228,8 @@ impl App {
                                 row_color = Color32::RED;
                             }
                         }
+
+
 
 
                         table_row.col(|ui| {
@@ -277,6 +287,8 @@ impl App {
                             let t = row.opomba.clone().unwrap_or_else(|| "".to_string());
                             ui.label(&t).on_hover_text(t);
                         });
+
+
 
                     });
                 });
@@ -426,7 +438,7 @@ impl eframe::App for App {
                     ui.checkbox(&mut self.filter_rumena, "Rumeni");
                     ui.checkbox(&mut self.filter_oranzna, "Oranžni");
                     ui.checkbox(&mut self.filter_rdeca, "Rdeči");
-                    ui.checkbox(&mut self.filter_modra, "Modri");
+                    ui.checkbox(&mut self.filter_modra_zelena, "Modri/Zeleni");
 
 
                     let reset = ui.button("Ponastavi filtre");
@@ -449,7 +461,7 @@ impl eframe::App for App {
                         self.filter_rumena = false;
                         self.filter_oranzna = false;
                         self.filter_rdeca = false;
-                        self.filter_modra = false;
+                        self.filter_modra_zelena = false;
                     }
 
 

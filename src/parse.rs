@@ -147,7 +147,7 @@ pub struct SifrantRow {
     pub mrp_karakteristika: String,
 }
 pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std::error::Error>> {
-    if !path.file_name().unwrap().eq("ŠIFRANT.xlsx") {
+    if !path.file_name().unwrap().eq("ŠIFRANT.XLSX") {
         Err("Bad filename!")?;
     }
     let mut row_data = Vec::new();

@@ -17,9 +17,9 @@ impl DBManager {
     }
 
 
-    pub fn get_data(&self) -> Result<Vec<ViewQuery>, Box<dyn std::error::Error>> {
+    pub fn get_data(&self, sort: &SortState) -> Result<Vec<ViewQuery>, Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
-        ViewQuery::query(&connection)
+        ViewQuery::query(&connection, &sort)
     }
 
 
@@ -45,13 +45,20 @@ impl DBManager {
                             WHEN poraba_3m = 0 THEN NULL
                             ELSE (zaloga + odprta_narocila) / poraba_3m
                         END
-                    ) VIRTUAL,
-
-                FOREIGN KEY(material) REFERENCES sifrant(material)
+                    ) VIRTUAL
             );
         ")?;
         connection.execute("CREATE INDEX IF NOT EXISTS idx_data_material ON data(material);")?;
 
+
+        connection.execute("COMMIT")?;
+        Ok(())
+    }
+
+    pub fn drop_data(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("DROP TABLE data;")?;
 
         connection.execute("COMMIT")?;
         Ok(())
@@ -70,8 +77,7 @@ impl DBManager {
                 odprta_narocila = excluded.odprta_narocila
         ")?;
         connection.execute("BEGIN TRANSACTION")?;
-        for (i, row) in row_data.iter().enumerate() {
-            println!("{}, INSERTING DATA!", i);
+        for row in row_data {
             statement.bind((1, row.material))?;
             statement.bind((2, row.zaloga))?;
             statement.bind((3, row.poraba_3m))?;
@@ -160,6 +166,8 @@ impl DBManager {
         self.try_create_view(&connection);
         Ok(())
     }
+
+
 
 
     fn create_dobavni_rok_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
@@ -258,10 +266,12 @@ pub struct ViewQuery {
 
 
 impl ViewQuery {
-    fn query(connection: &Connection) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
+    fn query(connection: &Connection, sort: &SortState) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
         let mut rows = Vec::with_capacity(2500);
 
-        let mut statement = connection.prepare("SELECT * FROM view_podatki")?;
+        let order_clause = sort.sql_order();
+        let sql = format!("SELECT * FROM view_podatki {}", order_clause);
+        let mut statement = connection.prepare(sql)?;
 
         while let State::Row = statement.next()? {
             let mut row = ViewQuery::default();
@@ -284,4 +294,63 @@ impl ViewQuery {
     }
 }
 
+
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SortColumn {
+    #[default]
+    Material,
+    NazivMateriala,
+    NabavnaSkupina,
+    MRP,
+    Zaloga,
+    Poraba3M,
+    Poraba12M,
+    OdprtaNarocila,
+    DobavniRok,
+    TrenutnaZalogaZadostujeZaMesecev,
+    TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev,
+    Opomba,
+}
+
+impl SortColumn {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            SortColumn::Material => "material",
+            SortColumn::NazivMateriala => "naziv_materiala",
+            SortColumn::NabavnaSkupina => "nabavna_skupina",
+            SortColumn::MRP => "mrp_karakteristika",
+            SortColumn::Zaloga => "zaloga",
+            SortColumn::Poraba3M => "poraba_3m",
+            SortColumn::Poraba12M => "poraba_12m",
+            &SortColumn::OdprtaNarocila => "odprta_narocila",
+            SortColumn::DobavniRok => "dobavni_rok",
+            SortColumn::TrenutnaZalogaZadostujeZaMesecev => "trenutna_zaloga_zadostuje_za_mesecev",
+            SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => "trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev",
+            SortColumn::Opomba => "opomba",
+        }
+    }
+}
+
+pub struct SortState {
+    pub sort_column: SortColumn,
+    pub descending: bool,
+}
+
+impl Default for SortState {
+    fn default() -> Self {
+        SortState {
+            sort_column: SortColumn::default(),
+            descending: false,
+        }
+    }
+}
+
+impl SortState {
+    fn sql_order(&self) -> String {
+        format!("ORDER BY {} {}",
+                self.sort_column.as_str(),
+                if self.descending { "DESC" } else { "ASC" }
+        )
+    }
+}
 

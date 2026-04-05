@@ -8,7 +8,7 @@ use eframe::egui::*;
 use egui_extras::{Column, TableBuilder};
 use rfd::MessageLevel;
 use rust_xlsxwriter::{Format, Workbook};
-use crate::db::{DBManager, ViewQuery};
+use crate::db::{DBManager, SortColumn, SortState, ViewQuery};
 use crate::parse::{parse_import_files, parse_sifrant_file};
 
 struct App {
@@ -16,6 +16,7 @@ struct App {
 
     row_data: Option<Vec<ViewQuery>>,
     successfully_loaded_query: Option<bool>,
+    sort_state: SortState,
 
 
     opomba_material: String,
@@ -69,8 +70,10 @@ impl App {
         let mut row_data = None;
         let db_manager = DBManager { db_name: "magneti_db.sqlite3".to_string() };
         let _ = db_manager.try_create_tables();
+        let sort_state = SortState::default();
 
-        let result = db_manager.get_data();
+
+        let result = db_manager.get_data(&sort_state);
 
         let successfully_loaded_query = match result {
             Err(err) => {
@@ -88,6 +91,7 @@ impl App {
             db_manager,
             row_data,
             successfully_loaded_query,
+            sort_state,
 
 
             opomba_material: String::new(),
@@ -191,7 +195,7 @@ impl App {
                 .columns(Column::exact(number_width), 1)
                 .columns(Column::exact(string_width * 0.6), 1)
                 .columns(Column::exact(number_width), 2)
-                .columns(Column::exact(number_width), 5)
+                .columns(Column::exact(number_width + 5.), 5)
                 .columns(Column::exact(number_width * 1.8), 2)
                 .columns(Column::remainder(), 1)
                 .header(50.0, |mut header| {
@@ -241,14 +245,6 @@ impl App {
                             }
                         }
 
-                        /*
-                        table_row.col(|ui| {
-                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(format!("{}", index + 1));
-                        });
-
-                         */
-
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
                             ui.label(row.material.to_string());
@@ -276,7 +272,20 @@ impl App {
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.poraba_3m.map_or("".to_string(), |v| format_number_custom(v)));
+                            let poraba_3m = row.poraba_3m.map_or("".to_string(), |v| format_number_custom(v));
+                            let poraba_12m = row.poraba_12m.map_or("".to_string(), |v| format_number_custom(v));
+
+                            let (arrow, color) = if poraba_3m > poraba_12m {
+                                ("🔺", Color32::BLACK)
+                            } else if !poraba_3m.eq("0,00") && !poraba_12m.eq("0,00") && !poraba_3m.eq(poraba_12m.as_str()) {
+                                ("🔻", Color32::BLACK)
+                            } else {
+                                ("     ", Color32::TRANSPARENT)
+                            };
+
+
+                            ui.colored_label(color, arrow);
+                            ui.label(poraba_3m);
                         });
 
                         table_row.col(|ui| {
@@ -351,7 +360,7 @@ impl eframe::App for App {
                     ui.colored_label(color, "■");
                 }
                 if ui.button("Naloži").clicked() {
-                    match self.db_manager.get_data() {
+                    match self.db_manager.get_data(&self.sort_state) {
                         Ok(rows) => {
                             self.row_data = Some(rows);
                             self.successfully_loaded_query = Some(true);
@@ -496,6 +505,9 @@ impl eframe::App for App {
                         self.filter_oranzna = false;
                         self.filter_rdeca = false;
                         self.filter_modra_zelena = false;
+
+
+                        self.sort_state = SortState::default();
                     }
 
 
@@ -538,7 +550,7 @@ impl eframe::App for App {
                             }
                         }
 
-                        let result = self.db_manager.get_data();
+                        let result = self.db_manager.get_data(&self.sort_state);
 
                         match result {
                             Err(err) => {
@@ -552,17 +564,6 @@ impl eframe::App for App {
                             }
                         }
                     }
-                    /*
-                    if self.successfully_stored_dobavni_rok.is_some() {
-                        if self.successfully_stored_dobavni_rok.unwrap() {
-                            ui.colored_label(Color32::GREEN, "Shranil");
-                        } else {
-                            ui.colored_label(Color32::RED, "Napaka pri shranjevanju dobavnega roka!");
-                        }
-                    }
-
-
-                     */
                 });
 
             });
@@ -602,7 +603,7 @@ impl eframe::App for App {
                             }
                         }
 
-                        let result = self.db_manager.get_data();
+                        let result = self.db_manager.get_data(&self.sort_state);
 
                         match result {
                             Err(err) => {
@@ -616,18 +617,6 @@ impl eframe::App for App {
                             }
                         }
                     }
-
-                    /*
-                    if self.successfully_stored_opomba.is_some() {
-                        if self.successfully_stored_opomba.unwrap() {
-                            ui.colored_label(Color32::GREEN, "Shranil");
-                        } else {
-                            ui.colored_label(Color32::RED, "Napaka pri shranjevanju opombe!");
-                        }
-                    }
-
-                     */
-
                 });
 
             });
@@ -652,6 +641,11 @@ impl eframe::App for App {
                         .set_directory(downloads_dir)
                         .pick_files();
                     if files.is_some() {
+                        match self.db_manager.drop_data() {
+                            Err(e) => println!("dropping error: {}", e),
+                            Ok(_) => println!("Successfully dropped data")
+                        }
+
                         let result = parse_import_files(files.unwrap());
                         match result {
                             Ok(row_data) => {
@@ -722,6 +716,51 @@ impl eframe::App for App {
                         }
                     }
                 }
+            });
+
+        Window::new("Sort ")
+            .resizable(false)
+            .collapsible(true)
+            .default_open(false)
+            .fixed_pos(pos2(80., 45.))
+            .order(Order::Middle)
+            .default_size(vec2(300., 150.))
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    let old_column = self.sort_state.sort_column;
+
+                    ComboBox::from_label("Sortiraj po")
+                        .selected_text(self.sort_state.sort_column.as_str())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Material, "Material");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::NazivMateriala, "Naziv");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::NabavnaSkupina, "Nabavnik");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::MRP, "MRP");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Zaloga, "Zaloga");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Poraba3M, "Poraba 3M");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Poraba12M, "Poraba 12M");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::OdprtaNarocila, "Odprto");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::DobavniRok, "Dobava");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaZadostujeZaMesecev, "Zaloga SAP");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Zaloga SAP in odprto");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Opomba, "Opomba");
+                        });
+                    if old_column != self.sort_state.sort_column ||
+                        ui.checkbox(&mut self.sort_state.descending, "Padajoče").changed()
+                    {
+                        match self.db_manager.get_data(&self.sort_state) {
+                            Ok(rows) => {
+                                self.row_data = Some(rows);
+                                self.successfully_loaded_query = Some(true);
+                            }
+                            Err(err) => {
+                                println!("sort query error: {:?}", err);
+                                self.successfully_loaded_query = Some(false);
+                            }
+                        }
+                    }
+
+                });
             });
     }
 }

@@ -224,7 +224,7 @@ impl App {
                                 if row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.) <= row.dobavni_rok.unwrap_or(0.) {
                                     row_color = Color32::LIGHT_BLUE;
                                 } else {
-                                    row_color = Color32::GREEN;
+                                    row_color = Color32::LIGHT_GREEN;
                                 }
                             }
 
@@ -236,12 +236,12 @@ impl App {
 
                             if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 &&
                                 row.odprta_narocila.is_some_and(|v| v == 0.) {
-                                row_color = Color32::ORANGE;
+                                row_color = Color32::from_rgb(255, 153, 51);
                             }
 
                             if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.5 &&
                                 row.odprta_narocila.is_some_and(|v| v == 0.) {
-                                row_color = Color32::RED;
+                                row_color = Color32::from_rgb(255, 51, 51);
                             }
                         }
 

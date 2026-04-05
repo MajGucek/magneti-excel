@@ -718,18 +718,18 @@ impl eframe::App for App {
                 }
             });
 
-        Window::new("Sort ")
+        Window::new("Razvrstitev     ")
             .resizable(false)
             .collapsible(true)
             .default_open(false)
-            .fixed_pos(pos2(80., 45.))
+            .fixed_pos(pos2(490., 45.))
             .order(Order::Middle)
             .default_size(vec2(300., 150.))
             .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
+                ui.horizontal(|ui| {
                     let old_column = self.sort_state.sort_column;
 
-                    ComboBox::from_label("Sortiraj po")
+                    ComboBox::from_label("")
                         .selected_text(self.sort_state.sort_column.as_str())
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Material, "Material");
@@ -759,7 +759,6 @@ impl eframe::App for App {
                             }
                         }
                     }
-
                 });
             });
     }

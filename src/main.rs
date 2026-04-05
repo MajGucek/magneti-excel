@@ -279,6 +279,8 @@ impl App {
                                 ("🔺", Color32::BLACK)
                             } else if !poraba_3m.eq("0,00") && !poraba_12m.eq("0,00") && !poraba_3m.eq(poraba_12m.as_str()) {
                                 ("🔻", Color32::BLACK)
+                            } else if poraba_3m.eq("0,00") && !poraba_12m.eq("0,00") {
+                                ("🔻", Color32::BLACK)
                             } else {
                                 ("     ", Color32::TRANSPARENT)
                             };

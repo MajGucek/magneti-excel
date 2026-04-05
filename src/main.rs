@@ -3,34 +3,26 @@
 mod parse;
 mod db;
 
-use std::time::{Duration, Instant};
 use eframe::{NativeOptions};
 use eframe::egui::*;
 use egui_extras::{Column, TableBuilder};
+use rfd::MessageLevel;
 use rust_xlsxwriter::{Format, Workbook};
 use crate::db::{DBManager, ViewQuery};
 use crate::parse::{parse_import_files, parse_sifrant_file};
 
 struct App {
     db_manager: DBManager,
-    retry_import: bool,
-    successfully_parsed: Option<bool>,
-    successfully_stored_data: Option<bool>,
-    successfully_stored_sifrant: Option<bool>,
 
     row_data: Option<Vec<ViewQuery>>,
     successfully_loaded_query: Option<bool>,
 
-    successfully_exported: Option<bool>,
-    export_counter: Option<Instant>,
 
     opomba_material: String,
     opomba_opomba: String,
-    successfully_stored_opomba: Option<bool>,
 
     dobavni_rok_material: String,
     dobavni_rok_dobavni_rok: String,
-    successfully_stored_dobavni_rok: Option<bool>,
 
 
     /* --Columns-- */
@@ -94,23 +86,15 @@ impl App {
 
         Self {
             db_manager,
-            retry_import: false,
-            successfully_parsed: None,
-            successfully_stored_data: None,
-            successfully_stored_sifrant: None,
             row_data,
             successfully_loaded_query,
 
-            successfully_exported: None,
-            export_counter: None,
 
             opomba_material: String::new(),
             opomba_opomba: String::new(),
-            successfully_stored_opomba: None,
 
             dobavni_rok_material: String::new(),
             dobavni_rok_dobavni_rok: String::new(),
-            successfully_stored_dobavni_rok: None,
 
             filter_rdeca: false,
             filter_oranzna: false,
@@ -204,12 +188,12 @@ impl App {
             TableBuilder::new(ui)
                 .striped(true)
                 .cell_layout(Layout::left_to_right(Align::Center))
-                .columns(Column::exact(number_width), 1) // Material
-                .columns(Column::exact(string_width * 0.6), 1) // Naziv materiala
-                .columns(Column::exact(number_width), 2) // nabavna_skupina, mrp_karakteristika
-                .columns(Column::exact(number_width), 5) // Zaloga, Poraba, Odprta narocila, Dobavni rok
-                .columns(Column::exact(number_width * 1.8), 2) // trenutni zalogi
-                .columns(Column::remainder(), 1) // Opomba
+                .columns(Column::exact(number_width), 1)
+                .columns(Column::exact(string_width * 0.6), 1)
+                .columns(Column::exact(number_width), 2)
+                .columns(Column::exact(number_width), 5)
+                .columns(Column::exact(number_width * 1.8), 2)
+                .columns(Column::remainder(), 1)
                 .header(50.0, |mut header| {
                     header.col(|ui| {ui.heading("Material"); });
                     header.col(|ui| {ui.heading("Naziv"); });
@@ -358,7 +342,7 @@ fn format_number_custom(value: f64) -> String {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        //ctx.request_repaint();
+        ctx.request_repaint();
 
         CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
@@ -384,32 +368,20 @@ impl eframe::App for App {
                         let mut resp: Result<(), Box<dyn std::error::Error>> = Ok(());
 
                         let _ = self.row_data.as_ref().map(|d| { resp = export_filtered_to_excel(&self.apply_filters(&d)); });
-                        self.export_counter = Some(Instant::now());
                         match resp {
                             Err(err) => {
                                 println!("export error: {:?}", err);
-                                self.successfully_exported = Some(false);
+                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri izvozu").set_level(MessageLevel::Error).show();
                             },
                             Ok(_) => {
-                                self.successfully_exported = Some(true);
+                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno izvozil").set_level(MessageLevel::Info).show();
                             }
                         }
-                    }
-
-                    if self.successfully_exported.is_some() && self.export_counter.is_some_and(|start| start.elapsed() < Duration::from_secs(3)){
-                        if self.successfully_exported.unwrap() {
-                            ui.colored_label(Color32::GREEN, "Izvozil!");
-                        } else {
-                            ui.colored_label(Color32::GREEN, "Napaka!");
-                        }
-                    } else {
-                        self.export_counter = None;
                     }
                 });
 
             });
 
-            println!("Before filters: {}", self.row_data.as_ref().unwrap_or(&Vec::new()).len());
             let data = match &self.row_data {
                 Some(d) => self.apply_filters(d),
                 None => Vec::new(),
@@ -558,11 +530,11 @@ impl eframe::App for App {
                         match resp {
                             Err(err) => {
                                 println!("error storing opomba: {:?}", err.to_string());
-                                self.successfully_stored_dobavni_rok = Some(false);
+                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju").set_level(MessageLevel::Error).show();
                             },
                             Ok(_) => {
                                 println!("stored opomba!");
-                                self.successfully_stored_dobavni_rok = Some(true);
+                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil dobavni rok").set_level(MessageLevel::Info).show();
                             }
                         }
 
@@ -580,6 +552,7 @@ impl eframe::App for App {
                             }
                         }
                     }
+                    /*
                     if self.successfully_stored_dobavni_rok.is_some() {
                         if self.successfully_stored_dobavni_rok.unwrap() {
                             ui.colored_label(Color32::GREEN, "Shranil");
@@ -588,6 +561,8 @@ impl eframe::App for App {
                         }
                     }
 
+
+                     */
                 });
 
             });
@@ -619,11 +594,11 @@ impl eframe::App for App {
                         match resp {
                             Err(err) => {
                                 println!("error storing opomba: {:?}", err.to_string());
-                                self.successfully_stored_opomba = Some(false);
+                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju opombe").set_level(MessageLevel::Error).show();
                             },
                             Ok(_) => {
                                 println!("stored opomba!");
-                                self.successfully_stored_opomba = Some(true);
+                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil opombo").set_level(MessageLevel::Info).show();
                             }
                         }
 
@@ -641,6 +616,8 @@ impl eframe::App for App {
                             }
                         }
                     }
+
+                    /*
                     if self.successfully_stored_opomba.is_some() {
                         if self.successfully_stored_opomba.unwrap() {
                             ui.colored_label(Color32::GREEN, "Shranil");
@@ -648,6 +625,8 @@ impl eframe::App for App {
                             ui.colored_label(Color32::RED, "Napaka pri shranjevanju opombe!");
                         }
                     }
+
+                     */
 
                 });
 
@@ -666,7 +645,6 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 let sifrant_button = ui.button("Vnos šifrant");
                 let import_button = ui.button("Vnos Poraba 12M, Poraba 3M, Zaloga, Odprta naročila");
-                let mut file_input_error: Option<Box<dyn std::error::Error>> = None;
                 if import_button.clicked() {
                     let downloads_dir = dirs_next::download_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
                     let files = rfd::FileDialog::new()
@@ -677,28 +655,23 @@ impl eframe::App for App {
                         let result = parse_import_files(files.unwrap());
                         match result {
                             Ok(row_data) => {
-                                self.retry_import = false;
-                                self.successfully_parsed = Some(true);
                                 let db_result = self.db_manager.store_to_data(row_data);
                                 match db_result {
                                     Ok(_) => {
-                                        self.successfully_stored_data = Some(true);
+                                        rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil podatke").set_level(MessageLevel::Info).show();
                                     },
                                     Err(err) => {
                                         println!("data: {:?}", err);
-                                        self.successfully_stored_data = Some(false);
+                                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju podatkov").set_level(MessageLevel::Error).show();
                                     }
                                 }
                             },
-                            Err(e) => {
-                                self.retry_import = true;
-                                self.successfully_parsed = Some(false);
-                                file_input_error = Some(e);
+                            Err(_) => {
+                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri branju Excel-a").set_level(MessageLevel::Error).show();
                             }
                         }
                     } else {
-                        self.retry_import = true;
-
+                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri branju pri dobivanju datotek").set_level(MessageLevel::Error).show();
                     }
                 }
 
@@ -716,59 +689,38 @@ impl eframe::App for App {
                                 let db_result = self.db_manager.store_sifrant_to_db(rows);
                                 match db_result {
                                     Ok(_) => {
-                                        self.successfully_stored_sifrant = Some(true);
+                                        rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil šifrant").set_level(MessageLevel::Info).show();
                                     },
                                     Err(err) => {
                                         println!("Šifrant: {:?}", err);
-                                        self.successfully_stored_sifrant = Some(false);
+                                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju šifranta").set_level(MessageLevel::Error).show();
                                     }
                                 }
                             },
                             Err(e) => {
-                                file_input_error = Some(e);
+                                println!("{}", e);
                             }
                         }
                     } else {
-                        self.retry_import = true;
+                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri dobivanju datoteke").set_level(MessageLevel::Error).show();
                     }
                 }
 
 
-
-                if self.retry_import {
-                    if file_input_error.is_none() {
-                        ui.colored_label(Color32::RED, "Nepravilen vnos datotek");
-                    } else {
-                        ui.colored_label(Color32::RED, file_input_error.unwrap().to_string());
-                    }
-                }
-                if self.successfully_parsed.is_some() {
-                    if self.successfully_parsed.unwrap() {
-                        ui.colored_label(Color32::GREEN, "Brez napak v Excel-u!");
-                    } else {
-                        ui.colored_label(Color32::ORANGE, "Napaka v Excel-u");
-                    }
-                }
-                if self.successfully_stored_data.is_some() {
-                    if self.successfully_stored_data.unwrap() {
-                        ui.colored_label(Color32::GREEN, "Uspešno shranil v bazo 3 Excel-ov");
-                    } else {
-                        ui.colored_label(Color32::ORANGE, "Neuspešno shranjevanje v bazo 3 Excel-ov");
-                    }
-                }
-
-                if self.successfully_stored_sifrant.is_some() {
-                    if self.successfully_stored_sifrant.unwrap() {
-                        ui.colored_label(Color32::GREEN, "Uspešno shranil v bazo šifranta");
-                    } else {
-                        ui.colored_label(Color32::ORANGE, "Neuspešno shranjevanje v bazo šifranta");
-                    }
-                }
-
-
-                let delete = ui.button("Izbriši baze").on_hover_text("Pred posodabljanjem!");
+                let delete = ui.button("Izbriši baze").on_hover_text("Izbriši pred posodabljanjem!");
                 if delete.clicked() {
-                    let _ = self.db_manager.drop_all_tables();
+                    let res = self.db_manager.drop_all_tables();
+                    match res {
+                        Err(e) => {
+                            if !e.to_string().eq("no such table: data (code 1)") {
+                                println!("{}", e);
+                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri brisanju podatkov").set_level(MessageLevel::Error).show();
+                            }
+                        },
+                        Ok(_) => {
+                            rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno zbrisal podatke").set_level(MessageLevel::Info).show();
+                        }
+                    }
                 }
             });
     }
@@ -789,12 +741,12 @@ pub fn export_filtered_to_excel(
     worksheet.write_string(0, 3, "MRP")?;
     worksheet.write_string(0, 4, "Zaloga")?;
     worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnje 3 mesece")?;
-    worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnjih 12 mesecev")?;
-    worksheet.write_string(0, 6, "Odprto, Odprta naročila dobaviteljem")?;
-    worksheet.write_string(0, 7, "Dobava, Predviden dobavni rok v mesecih")?;
-    worksheet.write_string(0, 8, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
-    worksheet.write_string(0, 9, "Zaloga SAP in odprto, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
-    worksheet.write_string(0, 10, "Opomba")?;
+    worksheet.write_string(0, 6, "Poraba, Povprečna mesečna poraba za zadnjih 12 mesecev")?;
+    worksheet.write_string(0, 7, "Odprto, Odprta naročila dobaviteljem")?;
+    worksheet.write_string(0, 8, "Dobava, Predviden dobavni rok v mesecih")?;
+    worksheet.write_string(0, 9, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
+    worksheet.write_string(0, 10, "Zaloga SAP in odprto, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
+    worksheet.write_string(0, 11, "Opomba")?;
 
 
     for (row_idx, item) in data.iter().enumerate() {

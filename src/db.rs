@@ -35,7 +35,11 @@ impl DBManager {
                 trenutna_zaloga_zadostuje_za_mesecev REAL
                     GENERATED ALWAYS AS (
                         CASE
-                            WHEN poraba_3m = 0 THEN NULL
+                            WHEN poraba_3m = 0 OR poraba_3m IS NULL THEN
+                            CASE
+                                WHEN poraba_12m = 0 OR poraba_12m IS NULL THEN NULL
+                                ELSE zaloga / poraba_12m
+                            END
                             ELSE zaloga / poraba_3m
                         END
                     ) VIRTUAL,

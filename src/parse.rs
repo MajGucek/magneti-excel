@@ -8,13 +8,14 @@ use rfd::{MessageDialog, MessageLevel};
 pub struct RowData {
     pub material: i64,
     pub zaloga: f64,
-    pub poraba: f64,
+    pub poraba_3m: f64,
+    pub poraba_12m: f64,
     pub odprta_narocila: f64,
 }
 pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
-    if files.len() != 3 {
+    if files.len() != 4 {
         MessageDialog::new()
-            .set_title("Napaka, nepravilno število datotek != 3")
+            .set_title("Napaka, nepravilno število datotek != 4")
             .set_level(MessageLevel::Error)
             .show();
     }
@@ -22,12 +23,11 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
 
 
     let poraba_file = files.iter().find(|&path_buf| {
-        path_buf.file_name().unwrap() == "PORABA.XLSX"
-    }).ok_or("File PORABA.XLSX not found")?;
-
+        path_buf.file_name().unwrap() == "PORABA 3M.XLSX"
+    }).ok_or("File PORABA 3M.XLSX not found")?;
     let mut workbook = open_workbook_auto(poraba_file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
-    let mut material_map: HashMap<i64, f64> = HashMap::new();
+    let mut poraba_3m_map: HashMap<i64, f64> = HashMap::new();
     for row in range.rows().skip(1) {
         let material = row.get(1)
             .and_then(DataType::get_string)
@@ -40,7 +40,34 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
             .map(|f| f)
             .unwrap_or(0.);
 
-        let entry = material_map
+        let entry = poraba_3m_map
+            .entry(material)
+            .or_insert(0.0);
+
+        *entry += klc_v_em_vnosa;
+    }
+
+
+
+    let poraba_file = files.iter().find(|&path_buf| {
+        path_buf.file_name().unwrap() == "PORABA 12M.XLSX"
+    }).ok_or("File PORABA 12M.XLSX not found")?;
+    let mut workbook = open_workbook_auto(poraba_file)?;
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let mut poraba_12m_map: HashMap<i64, f64> = HashMap::new();
+    for row in range.rows().skip(1) {
+        let material = row.get(1)
+            .and_then(DataType::get_string)
+            .map(|f| f.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0);
+        if material == 0 { continue; }
+
+        let klc_v_em_vnosa = row.get(9)
+            .and_then(DataType::get_float)
+            .map(|f| f)
+            .unwrap_or(0.);
+
+        let entry = poraba_12m_map
             .entry(material)
             .or_insert(0.0);
 
@@ -92,13 +119,15 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
             .unwrap_or(0.);
 
 
-        let poraba = material_map.get(&material).unwrap_or(&0.).abs() / 12.;
+        let poraba_3m = poraba_3m_map.get(&material).unwrap_or(&0.).abs() / 3.;
+        let poraba_12m = poraba_12m_map.get(&material).unwrap_or(&0.).abs() / 12.;
         let odprta_narocila = *dobava_map.get(&material).unwrap_or(&0.);
 
         row_data.push(RowData {
             material,
             zaloga,
-            poraba,
+            poraba_3m,
+            poraba_12m,
             odprta_narocila
         });
     }

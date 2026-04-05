@@ -32,6 +32,11 @@ struct App {
     dobavni_rok_dobavni_rok: String,
     successfully_stored_dobavni_rok: Option<bool>,
 
+
+    /* --Columns-- */
+
+
+
     /* --Filters-- */
     filter_rdeca: bool,
     filter_oranzna: bool,
@@ -55,6 +60,8 @@ struct App {
 
     filter_dobavni_rok: bool,
     filter_dobavni_rok_gt: String,
+
+    filter_opomba: bool,
 }
 
 impl App {
@@ -128,6 +135,8 @@ impl App {
 
             filter_dobavni_rok: false,
             filter_dobavni_rok_gt: String::from("0"),
+
+            filter_opomba: false,
         }
     }
 
@@ -155,12 +164,12 @@ impl App {
 
                 let condition = if self.filter_zaloga_vecja && self.filter_poraba_vecja {
                     // both are checked then OR
-                    row.zaloga.is_some_and(|zal| zal > parse_string_to_f64(self.filter_zaloga_gt.as_str())) ||
-                        row.poraba.is_some_and(|por| por > parse_string_to_f64(self.filter_poraba_gt.as_str()))
+                    row.zaloga.is_some_and(|zal| zal > parse_string_to_optional_f64(self.filter_zaloga_gt.as_str()).unwrap_or(0.)) ||
+                        row.poraba_3m.is_some_and(|por| por > parse_string_to_optional_f64(self.filter_poraba_gt.as_str()).unwrap_or(0.))
                 } else if self.filter_zaloga_vecja && !self.filter_poraba_vecja {
-                    row.zaloga.is_some_and(|zal| zal > parse_string_to_f64(self.filter_zaloga_gt.as_str()))
+                    row.zaloga.is_some_and(|zal| zal > parse_string_to_optional_f64(self.filter_zaloga_gt.as_str()).unwrap_or(0.))
                 } else if !self.filter_zaloga_vecja && self.filter_poraba_vecja {
-                    row.poraba.is_some_and(|por| por > parse_string_to_f64(self.filter_poraba_gt.as_str()))
+                    row.poraba_3m.is_some_and(|por| por > parse_string_to_optional_f64(self.filter_poraba_gt.as_str()).unwrap_or(0.))
                 } else {
                     true
                 };
@@ -172,11 +181,12 @@ impl App {
 
                     condition &&
 
-                    (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > parse_string_to_f64(self.filter_odprta_narocila_gt.as_str()))) &&
-                    (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > parse_string_to_f64(self.filter_dobavni_rok_gt.as_str()))) &&
+                    (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > parse_string_to_optional_f64(self.filter_odprta_narocila_gt.as_str()).unwrap_or(0.))) &&
+                    (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > parse_string_to_optional_f64(self.filter_dobavni_rok_gt.as_str()).unwrap_or(0.))) &&
                     (color_matches || !any_color_filter_active) &&
                     (!self.filter_nabavnik_ni_definiran || row.nabavna_skupina.as_ref().is_some_and(|str| str.eq(""))) &&
-                    (!self.filter_nabavnik_definiran || !row.nabavna_skupina.as_ref().is_some_and(|str| str.eq("")))
+                    (!self.filter_nabavnik_definiran || !row.nabavna_skupina.as_ref().is_some_and(|str| str.eq(""))) &&
+                    (!self.filter_opomba || row.opomba.as_ref().is_some_and(|s| !s.eq("")))
         })
             .cloned()
             .collect()
@@ -194,24 +204,24 @@ impl App {
             TableBuilder::new(ui)
                 .striped(true)
                 .cell_layout(Layout::left_to_right(Align::Center))
-                //.columns(Column::exact(number_width), 1)
                 .columns(Column::exact(number_width), 1) // Material
                 .columns(Column::exact(string_width * 0.6), 1) // Naziv materiala
                 .columns(Column::exact(number_width), 2) // nabavna_skupina, mrp_karakteristika
-                .columns(Column::exact(number_width), 4) // Zaloga, Poraba, Odprta narocila, Dobavni rok
+                .columns(Column::exact(number_width), 5) // Zaloga, Poraba, Odprta narocila, Dobavni rok
                 .columns(Column::exact(number_width * 1.8), 2) // trenutni zalogi
                 .columns(Column::remainder(), 1) // Opomba
                 .header(50.0, |mut header| {
                     header.col(|ui| {ui.heading("Material"); });
                     header.col(|ui| {ui.heading("Naziv"); });
-                    header.col(|ui| {ui.heading("Nabavnik"); });
+                    header.col(|ui| {ui.heading("Nabavnik").on_hover_text("002 Neli\n008 Alenka/Viktorija\n010 Boštjan"); });
                     header.col(|ui| {ui.heading("MRP"); });
-                    header.col(|ui| {ui.heading("Zaloga"); });
-                    header.col(|ui| {ui.heading("Poraba").on_hover_text("Povprečna mesečna poraba za zadnjih 12 mesecev"); });
+                    header.col(|ui| {ui.heading("Zaloga").on_hover_text("Trenutna zaloga v SAP-u"); });
+                    header.col(|ui| {ui.heading("Poraba 3M").on_hover_text("Povprečna mesečna poraba za zadnje 3 mesece"); });
+                    header.col(|ui| {ui.heading("Poraba 12M").on_hover_text("Povprečna mesečna poraba za zadnjih 12 mesecev"); });
                     header.col(|ui| {ui.heading("Odprto").on_hover_text("Odprta naročila dobaviteljem"); });
                     header.col(|ui| {ui.heading("Dobava").on_hover_text("Predviden dobavni rok v mesecih"); });
-                    header.col(|ui| {ui.heading("Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za mesecev"); });
-                    header.col(|ui| {ui.heading("Zaloga SAP in odprto").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za mesecev"); });
+                    header.col(|ui| {ui.heading("Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev"); });
+                    header.col(|ui| {ui.heading("Zaloga SAP in odprto").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev"); });
                     header.col(|ui| {ui.heading("Opomba"); });
                 })
                 .body(|body| {
@@ -282,7 +292,12 @@ impl App {
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.poraba.map_or("".to_string(), |v| format_number_custom(v)));
+                            ui.label(row.poraba_3m.map_or("".to_string(), |v| format_number_custom(v)));
+                        });
+
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            ui.label(row.poraba_12m.map_or("".to_string(), |v| format_number_custom(v)));
                         });
 
                         table_row.col(|ui| {
@@ -475,6 +490,8 @@ impl eframe::App for App {
                         );
                     });
 
+                    ui.checkbox(&mut self.filter_opomba, "Artikel ima opombo");
+
                     ui.checkbox(&mut self.filter_rumena, "Rumeni");
                     ui.checkbox(&mut self.filter_oranzna, "Oranžni");
                     ui.checkbox(&mut self.filter_rdeca, "Rdeči");
@@ -500,6 +517,8 @@ impl eframe::App for App {
 
                         self.filter_dobavni_rok = false;
                         self.filter_dobavni_rok_gt = String::from("0");
+
+                        self.filter_opomba = false;
 
                         self.filter_rumena = false;
                         self.filter_oranzna = false;
@@ -534,7 +553,7 @@ impl eframe::App for App {
                     if dobavni_rok.clicked() {
                         let resp = self.db_manager.store_dobavni_rok((
                             self.dobavni_rok_material.parse().unwrap_or(0),
-                            parse_string_to_f64(self.dobavni_rok_dobavni_rok.as_str()),
+                            parse_string_to_optional_f64(self.dobavni_rok_dobavni_rok.as_str()),
                         ));
                         match resp {
                             Err(err) => {
@@ -646,12 +665,12 @@ impl eframe::App for App {
             .default_size(vec2(300., 200.))
             .show(ctx, |ui| {
                 let sifrant_button = ui.button("Vnos šifrant");
-                let import_button = ui.button("Vnos Poraba, Zaloga, Odprta naročila");
+                let import_button = ui.button("Vnos Poraba 12M, Poraba 3M, Zaloga, Odprta naročila");
                 let mut file_input_error: Option<Box<dyn std::error::Error>> = None;
                 if import_button.clicked() {
                     let downloads_dir = dirs_next::download_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
                     let files = rfd::FileDialog::new()
-                        .set_title("Izberi 3 datoteke!")
+                        .set_title("Izberi 4 datoteke!")
                         .set_directory(downloads_dir)
                         .pick_files();
                     if files.is_some() {
@@ -769,11 +788,12 @@ pub fn export_filtered_to_excel(
     worksheet.write_string(0, 2, "Nabavnik")?;
     worksheet.write_string(0, 3, "MRP")?;
     worksheet.write_string(0, 4, "Zaloga")?;
+    worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnje 3 mesece")?;
     worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnjih 12 mesecev")?;
     worksheet.write_string(0, 6, "Odprto, Odprta naročila dobaviteljem")?;
     worksheet.write_string(0, 7, "Dobava, Predviden dobavni rok v mesecih")?;
-    worksheet.write_string(0, 8, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za mesecev")?;
-    worksheet.write_string(0, 9, "Zaloga SAP in odprto, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za mesecev")?;
+    worksheet.write_string(0, 8, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
+    worksheet.write_string(0, 9, "Zaloga SAP in odprto, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
     worksheet.write_string(0, 10, "Opomba")?;
 
 
@@ -802,34 +822,39 @@ pub fn export_filtered_to_excel(
             None => worksheet.write_blank(row, 4, &Format::default())?,
         };
 
-        match item.poraba {
+        match item.poraba_3m {
             Some(v) => worksheet.write_number(row, 5, v)?,
             None => worksheet.write_blank(row, 5, &Format::default())?,
         };
 
-        match item.odprta_narocila {
+        match item.poraba_12m {
             Some(v) => worksheet.write_number(row, 6, v)?,
             None => worksheet.write_blank(row, 6, &Format::default())?,
         };
 
-        match item.dobavni_rok {
+        match item.odprta_narocila {
             Some(v) => worksheet.write_number(row, 7, v)?,
             None => worksheet.write_blank(row, 7, &Format::default())?,
         };
 
-        match item.trenutna_zaloga_zadostuje_za_mesecev {
+        match item.dobavni_rok {
             Some(v) => worksheet.write_number(row, 8, v)?,
             None => worksheet.write_blank(row, 8, &Format::default())?,
         };
 
-        match item.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev {
+        match item.trenutna_zaloga_zadostuje_za_mesecev {
             Some(v) => worksheet.write_number(row, 9, v)?,
             None => worksheet.write_blank(row, 9, &Format::default())?,
         };
 
-        match &item.opomba {
-            Some(s) => worksheet.write_string(row, 10, s)?,
+        match item.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev {
+            Some(v) => worksheet.write_number(row, 10, v)?,
             None => worksheet.write_blank(row, 10, &Format::default())?,
+        };
+
+        match &item.opomba {
+            Some(s) => worksheet.write_string(row, 11, s)?,
+            None => worksheet.write_blank(row, 11, &Format::default())?,
         };
     }
 
@@ -838,8 +863,12 @@ pub fn export_filtered_to_excel(
 }
 
 
-fn parse_string_to_f64(s: &str) -> f64 {
-    s.replace(",", ".").parse().unwrap_or(0.)
+fn parse_string_to_optional_f64(s: &str) -> Option<f64> {
+    if s.eq("") {
+        None
+    } else {
+        Some(s.replace(",", ".").parse().unwrap_or(0.))
+    }
 }
 
 fn main() {

@@ -29,20 +29,21 @@ impl DBManager {
             CREATE TABLE IF NOT EXISTS data (
                 material INTEGER PRIMARY KEY,
                 zaloga REAL,
-                poraba REAL,
+                poraba_3m REAL,
+                poraba_12m REAL,
                 odprta_narocila REAL,
                 trenutna_zaloga_zadostuje_za_mesecev REAL
                     GENERATED ALWAYS AS (
                         CASE
-                            WHEN poraba = 0 THEN NULL
-                            ELSE zaloga / poraba
+                            WHEN poraba_3m = 0 THEN NULL
+                            ELSE zaloga / poraba_3m
                         END
                     ) VIRTUAL,
                 trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev REAL
                     GENERATED ALWAYS AS (
                         CASE
-                            WHEN poraba = 0 THEN NULL
-                            ELSE (zaloga + odprta_narocila) / poraba
+                            WHEN poraba_3m = 0 THEN NULL
+                            ELSE (zaloga + odprta_narocila) / poraba_3m
                         END
                     ) VIRTUAL,
 
@@ -62,9 +63,10 @@ impl DBManager {
         self.create_data_table(&connection)?;
 
         let mut statement = connection.prepare("
-            INSERT INTO data (material, zaloga, poraba, odprta_narocila) VALUES (?, ?, ?, ?) ON CONFLICT(material) DO UPDATE SET
+            INSERT INTO data (material, zaloga, poraba_3m, poraba_12m, odprta_narocila) VALUES (?, ?, ?, ?, ?) ON CONFLICT(material) DO UPDATE SET
                 zaloga = excluded.zaloga,
-                poraba = excluded.poraba,
+                poraba_3m = excluded.poraba_3m,
+                poraba_12m = excluded.poraba_12m,
                 odprta_narocila = excluded.odprta_narocila
         ")?;
         connection.execute("BEGIN TRANSACTION")?;
@@ -72,8 +74,9 @@ impl DBManager {
             println!("{}, INSERTING DATA!", i);
             statement.bind((1, row.material))?;
             statement.bind((2, row.zaloga))?;
-            statement.bind((3, row.poraba))?;
-            statement.bind((4, row.odprta_narocila))?;
+            statement.bind((3, row.poraba_3m))?;
+            statement.bind((4, row.poraba_12m))?;
+            statement.bind((5, row.odprta_narocila))?;
             statement.next()?;
             statement.reset()?;
         }
@@ -131,8 +134,7 @@ impl DBManager {
         connection.execute("
             CREATE TABLE IF NOT EXISTS opombe (
                 material INTEGER PRIMARY KEY ,
-                opomba TEXT NOT NULL,
-                FOREIGN KEY(material) REFERENCES sifrant(material)
+                opomba TEXT NOT NULL
             );
         ")?;
         connection.execute("CREATE INDEX IF NOT EXISTS idx_opombe_material ON opombe(material);")?;
@@ -165,8 +167,7 @@ impl DBManager {
         connection.execute("
             CREATE TABLE IF NOT EXISTS dobavni_roki (
                 material INTEGER PRIMARY KEY,
-                dobavni_rok REAL NOT NULL,
-                FOREIGN KEY(material) REFERENCES sifrant(material)
+                dobavni_rok REAL
             );
         ")?;
         connection.execute("CREATE INDEX IF NOT EXISTS idx_dobavni_roki_material ON dobavni_roki(material);")?;
@@ -175,7 +176,7 @@ impl DBManager {
         Ok(())
     }
 
-    pub fn store_dobavni_rok(&self, dobavni_rok_row: (i64, f64)) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn store_dobavni_rok(&self, dobavni_rok_row: (i64, Option<f64>)) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
         self.create_dobavni_rok_table(&connection)?;
 
@@ -217,7 +218,8 @@ impl DBManager {
             s.nabavna_skupina,
             s.mrp_karakteristika,
             d.zaloga,
-            d.poraba,
+            d.poraba_3m,
+            d.poraba_12m,
             d.odprta_narocila,
             c.dobavni_rok,
             d.trenutna_zaloga_zadostuje_za_mesecev,
@@ -245,7 +247,8 @@ pub struct ViewQuery {
     pub nabavna_skupina: Option<String>,
     pub mrp_karakteristika: Option<String>,
     pub zaloga: Option<f64>,
-    pub poraba: Option<f64>,
+    pub poraba_3m: Option<f64>,
+    pub poraba_12m: Option<f64>,
     pub odprta_narocila: Option<f64>,
     pub dobavni_rok: Option<f64>,
     pub trenutna_zaloga_zadostuje_za_mesecev: Option<f64>,
@@ -267,12 +270,13 @@ impl ViewQuery {
             row.nabavna_skupina = statement.read(2)?;
             row.mrp_karakteristika = statement.read(3)?;
             row.zaloga = statement.read(4)?;
-            row.poraba = statement.read(5)?;
-            row.odprta_narocila = statement.read(6)?;
-            row.dobavni_rok = statement.read(7)?;
-            row.trenutna_zaloga_zadostuje_za_mesecev = statement.read(8)?;
-            row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev = statement.read(9)?;
-            row.opomba = statement.read(10)?;
+            row.poraba_3m = statement.read(5)?;
+            row.poraba_12m = statement.read(6)?;
+            row.odprta_narocila = statement.read(7)?;
+            row.dobavni_rok = statement.read(8)?;
+            row.trenutna_zaloga_zadostuje_za_mesecev = statement.read(9)?;
+            row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev = statement.read(10)?;
+            row.opomba = statement.read(11)?;
             rows.push(row);
         }
 

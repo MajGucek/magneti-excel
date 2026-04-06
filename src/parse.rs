@@ -182,3 +182,53 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
 
     Ok(row_data)
 }
+
+
+#[derive(Default)]
+pub struct DobaviteljRow {
+    pub material: i64,
+    pub dobavitelj: String,
+}
+pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<dyn std::error::Error>> {
+    if !path.file_name().unwrap().eq("DOBAVITELJI.XLSX") {
+        Err("Bad filename!")?;
+    }
+    let mut row_data = Vec::new();
+    let mut workbook = open_workbook_auto(path)?;
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let mut dobavitelji_map: HashMap<i64, Vec<String>> = HashMap::new();
+
+    for row in range.rows().skip(1) {
+        let material = row.get(0)
+            .and_then(DataType::get_string)
+            .map(|f| f.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0);
+        if material == 0 { continue; }
+
+        let dobavitelj = row.get(7)
+            .and_then(DataType::get_string)
+            .unwrap_or("").to_string();
+
+        let mut dont_add = false;
+
+        if dobavitelji_map.contains_key(&material) {
+           dont_add = dobavitelji_map.get(&material).as_ref().unwrap().iter().any(|dob| {
+              dob.to_lowercase().eq(dobavitelj.to_lowercase().as_str())
+           });
+        }
+
+        if !dont_add {
+            dobavitelji_map.entry(material).or_insert_with(|| Vec::new()).push(dobavitelj);
+        }
+    }
+
+    dobavitelji_map.into_iter().for_each(|(material, dobavitelji)| {
+        row_data.push(DobaviteljRow {
+            material,
+            dobavitelj: dobavitelji.join(", "),
+        });
+    });
+
+
+    Ok(row_data)
+}

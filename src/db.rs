@@ -1,5 +1,5 @@
 use sqlite::{Connection, State};
-use crate::parse::{RowData, SifrantRow};
+use crate::parse::{DobaviteljRow, RowData, SifrantRow};
 
 pub struct DBManager {
     pub db_name: String
@@ -96,7 +96,44 @@ impl DBManager {
         }
         connection.execute("COMMIT")?;
 
-        self.try_create_view(&connection);
+        self.try_create_view()?;
+        Ok(())
+    }
+
+
+
+    fn create_dobavitelji_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS dobavitelji (
+                id INTEGER PRIMARY KEY,
+                material INTEGER NOT NULL,
+                dobavitelj TEXT
+            );
+        ")?;
+        connection.execute("COMMIT")?;
+        Ok(())
+    }
+
+    pub fn store_dobavitelji_to_db(&self, rows: Vec<DobaviteljRow>) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_dobavitelji_table(&connection)?;
+
+        let mut statement = connection.prepare("
+            INSERT INTO dobavitelji (material, dobavitelj) VALUES (?, ?)
+        ")?;
+
+        connection.execute("BEGIN TRANSACTION")?;
+        for dobavitelj_row in rows {
+            statement.bind((1, dobavitelj_row.material))?;
+            statement.bind(&[(2, dobavitelj_row.dobavitelj.as_str())][..])?;
+            statement.next()?;
+            statement.reset()?;
+        }
+
+        connection.execute("COMMIT")?;
+
+        self.try_create_view()?;
         Ok(())
     }
 
@@ -138,7 +175,7 @@ impl DBManager {
 
         connection.execute("COMMIT")?;
 
-        self.try_create_view(&connection);
+        self.try_create_view()?;
         Ok(())
     }
 
@@ -171,7 +208,7 @@ impl DBManager {
         connection.execute("COMMIT")?;
 
 
-        self.try_create_view(&connection);
+        self.try_create_view()?;
         Ok(())
     }
 
@@ -206,7 +243,7 @@ impl DBManager {
         connection.execute("COMMIT")?;
 
 
-        self.try_create_view(&connection);
+        self.try_create_view()?;
         Ok(())
     }
 
@@ -219,33 +256,53 @@ impl DBManager {
         connection.execute("
             DROP TABLE sifrant;
         ")?;
+        connection.execute("
+            DROP TABLE dobavitelji;
+        ")?;
 
         connection.execute("COMMIT")?;
         Ok(())
     }
 
 
-    fn try_create_view(&self, connection: &Connection) {
-        let _ = connection.execute("
-        CREATE VIEW IF NOT EXISTS view_podatki AS
-        SELECT
-            s.material,
-            s.naziv_materiala,
-            s.nabavna_skupina,
-            s.mrp_karakteristika,
-            d.zaloga,
-            d.poraba_3m,
-            d.poraba_12m,
-            d.odprta_narocila,
-            c.dobavni_rok,
-            d.trenutna_zaloga_zadostuje_za_mesecev,
-            d.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev,
-            o.opomba
-        FROM sifrant s
-        LEFT JOIN data d ON s.material = d.material
-        LEFT JOIN dobavni_roki c ON s.material = c.material
-        LEFT JOIN opombe o ON s.material = o.material;
-    ");
+    pub fn try_drop_view(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        connection.execute("
+            DROP VIEW view_podatki;
+        ")?;
+        Ok(())
+    }
+
+    pub fn try_create_view(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        connection.execute("
+            CREATE VIEW IF NOT EXISTS view_podatki AS
+            SELECT
+                s.material,
+                s.naziv_materiala,
+                s.nabavna_skupina,
+                s.mrp_karakteristika,
+                d.zaloga,
+                d.poraba_3m,
+                d.poraba_12m,
+                d.odprta_narocila,
+                c.dobavni_rok,
+                d.trenutna_zaloga_zadostuje_za_mesecev,
+                d.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev,
+                COALESCE(dob.dobavitelji_list, ' ') AS dobavitelji,
+                o.opomba
+            FROM sifrant s
+            LEFT JOIN data d ON s.material = d.material
+            LEFT JOIN dobavni_roki c ON s.material = c.material
+            LEFT JOIN opombe o ON s.material = o.material
+            LEFT JOIN (
+                SELECT material,
+                LTRIM(GROUP_CONCAT(dobavitelj, ', '), ', ') AS dobavitelji_list
+                FROM dobavitelji GROUP BY material
+            ) dob ON s.material = dob.material
+            ;
+        ")?;
+        Ok(())
     }
 }
 
@@ -269,6 +326,7 @@ pub struct ViewQuery {
     pub dobavni_rok: Option<f64>,
     pub trenutna_zaloga_zadostuje_za_mesecev: Option<f64>,
     pub trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev: Option<f64>,
+    pub dobavitelji: Option<String>,
     pub opomba: Option<String>,
 }
 
@@ -294,7 +352,8 @@ impl ViewQuery {
             row.dobavni_rok = statement.read(8)?;
             row.trenutna_zaloga_zadostuje_za_mesecev = statement.read(9)?;
             row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev = statement.read(10)?;
-            row.opomba = statement.read(11)?;
+            row.dobavitelji = statement.read(11)?;
+            row.opomba = statement.read(12)?;
             rows.push(row);
         }
 
@@ -317,6 +376,7 @@ pub enum SortColumn {
     DobavniRok,
     TrenutnaZalogaZadostujeZaMesecev,
     TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev,
+    Dobavitelji,
     Opomba,
 }
 
@@ -334,6 +394,7 @@ impl SortColumn {
             SortColumn::DobavniRok => "dobavni_rok",
             SortColumn::TrenutnaZalogaZadostujeZaMesecev => "trenutna_zaloga_zadostuje_za_mesecev",
             SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => "trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev",
+            SortColumn::Dobavitelji => "dobavitelji",
             SortColumn::Opomba => "opomba",
         }
     }

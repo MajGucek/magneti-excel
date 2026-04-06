@@ -9,7 +9,7 @@ use egui_extras::{Column, TableBuilder};
 use rfd::MessageLevel;
 use rust_xlsxwriter::{Format, Workbook};
 use crate::db::{DBManager, SortColumn, SortState, ViewQuery};
-use crate::parse::{parse_import_files, parse_sifrant_file};
+use crate::parse::{parse_dobavitelji_file, parse_import_files, parse_sifrant_file};
 
 struct App {
     db_manager: DBManager,
@@ -39,6 +39,8 @@ struct App {
     filter_sifra_materiala: String,
     filter_naziv_materiala: String,
     filter_nabavnik: String,
+    filter_dobavitelj: String,
+
     filter_zaloga_vecja: bool,
     filter_zaloga_gt: String,
 
@@ -71,7 +73,8 @@ impl App {
         let db_manager = DBManager { db_name: "magneti_db.sqlite3".to_string() };
         let _ = db_manager.try_create_tables();
         let sort_state = SortState::default();
-
+        let _ = db_manager.try_drop_view();
+        let _ = db_manager.try_create_view().unwrap();
 
         let result = db_manager.get_data(&sort_state);
 
@@ -109,6 +112,8 @@ impl App {
             filter_sifra_materiala: String::new(),
             filter_naziv_materiala: String::new(),
             filter_nabavnik: String::new(),
+            filter_dobavitelj: String::new(),
+
             filter_zaloga_vecja: true,
             filter_zaloga_gt: String::from("0"),
 
@@ -166,7 +171,7 @@ impl App {
                 format!("{}", row.material).contains(self.filter_sifra_materiala.as_str()) &&
                     row.naziv_materiala.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_naziv_materiala.to_lowercase().as_str())) &&
                     row.nabavna_skupina.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_nabavnik.to_lowercase().as_str())) &&
-
+                    row.dobavitelji.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_dobavitelj.to_lowercase().as_str())) &&
                     condition &&
 
                     (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > parse_string_to_optional_f64(self.filter_odprta_narocila_gt.as_str()).unwrap_or(0.))) &&
@@ -184,33 +189,42 @@ impl App {
 
 
     pub fn render_table(&self, ui: &mut Ui, data: &Vec<ViewQuery>) {
-        let number_width = 100.;
-        let string_width = 550.;
-
         ScrollArea::both().show(ui, |ui| {
             ui.style_mut().visuals.faint_bg_color = Color32::from_rgb(200, 200, 200);
             TableBuilder::new(ui)
                 .striped(true)
                 .cell_layout(Layout::left_to_right(Align::Center))
-                .columns(Column::exact(number_width), 1)
-                .columns(Column::exact(string_width * 0.6), 1)
-                .columns(Column::exact(number_width), 2)
-                .columns(Column::exact(number_width + 5.), 5)
-                .columns(Column::exact(number_width * 1.8), 2)
-                .columns(Column::remainder(), 1)
+                .columns(Column::exact(80.), 1) // Material
+                .columns(Column::exact(300.), 1)// Naziv
+                .columns(Column::exact(85.), 1) // Zaloga
+                .columns(Column::exact(100.5), 1)// Poraba 3M
+                .columns(Column::exact(100.5), 1)// Poraba 12M
+                .columns(Column::exact(90.), 1)// Odprto
+                .columns(Column::exact(90.), 1)// Dobava
+                .columns(Column::exact(110.), 1)// Zaloga SAP
+                .columns(Column::exact(120.), 1)// Zaloga skupaj
+                .columns(Column::exact(300.), 1)// Opomba
+                .columns(Column::exact(90.), 1)// Nabavnik
+                .columns(Column::exact(300.), 1)//Dobavitelji
+
+                .columns(Column::remainder(), 1)// MRP
                 .header(50.0, |mut header| {
                     header.col(|ui| {ui.heading("Material"); });
                     header.col(|ui| {ui.heading("Naziv"); });
-                    header.col(|ui| {ui.heading("Nabavnik").on_hover_text("002 Neli\n008 Alenka/Viktorija\n010 Boštjan"); });
-                    header.col(|ui| {ui.heading("MRP"); });
+
+
                     header.col(|ui| {ui.heading("Zaloga").on_hover_text("Trenutna zaloga v SAP-u"); });
                     header.col(|ui| {ui.heading("Poraba 3M").on_hover_text("Povprečna mesečna poraba za zadnje 3 mesece"); });
                     header.col(|ui| {ui.heading("Poraba 12M").on_hover_text("Povprečna mesečna poraba za zadnjih 12 mesecev"); });
                     header.col(|ui| {ui.heading("Odprto").on_hover_text("Odprta naročila dobaviteljem"); });
                     header.col(|ui| {ui.heading("Dobava").on_hover_text("Predviden dobavni rok v mesecih"); });
                     header.col(|ui| {ui.heading("Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev"); });
-                    header.col(|ui| {ui.heading("Zaloga SAP in odprto").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev"); });
+                    header.col(|ui| {ui.heading("Zaloga skupaj").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev"); });
+
                     header.col(|ui| {ui.heading("Opomba"); });
+                    header.col(|ui| {ui.heading("Nabavnik").on_hover_text("002 Neli\n008 Alenka/Viktorija\n010 Boštjan"); });
+                    header.col(|ui| {ui.heading("Dobavitelji"); });
+                    header.col(|ui| {ui.heading("MRP"); });
                 })
                 .body(|body| {
                     body.rows(25., data.len(), |mut table_row| {
@@ -255,15 +269,9 @@ impl App {
                             ui.label(row.naziv_materiala.clone().unwrap_or_else(|| "".to_string()));
                         });
 
-                        table_row.col(|ui| {
-                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.nabavna_skupina.clone().unwrap_or_else(|| "".to_string()));
-                        });
 
-                        table_row.col(|ui| {
-                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.mrp_karakteristika.clone().unwrap_or_else(|| "".to_string()));
-                        });
+
+
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
@@ -315,13 +323,30 @@ impl App {
                             ui.label(row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v)));
                         });
 
+
+
+
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
                             let t = row.opomba.clone().unwrap_or_else(|| "".to_string());
                             ui.label(&t).on_hover_text(t);
                         });
 
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            ui.label(row.nabavna_skupina.clone().unwrap_or_else(|| "".to_string()));
+                        });
 
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            let t = row.dobavitelji.clone().unwrap_or_else(|| "".to_string());
+                            ui.label(&t);//.on_hover_text(t);
+                        });
+
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            ui.label(row.mrp_karakteristika.clone().unwrap_or_else(|| "".to_string()));
+                        });
 
                     });
                 });
@@ -431,6 +456,12 @@ impl eframe::App for App {
                             .hint_text("Iskanje po nabavniku...")
                     );
 
+                    ui.add(
+                        TextEdit::singleline(&mut self.filter_dobavitelj)
+                            .hint_text("Iskanje po dobavitelju...")
+                    );
+
+
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut self.filter_zaloga_vecja, "zaloga večja kot");
                         ui.add(
@@ -486,6 +517,7 @@ impl eframe::App for App {
                         self.filter_sifra_materiala = String::new();
                         self.filter_naziv_materiala = String::new();
                         self.filter_nabavnik = String::new();
+                        self.filter_dobavitelj = String::new();
                         self.filter_zaloga_vecja = true;
                         self.filter_zaloga_gt = String::from("0");
 
@@ -510,6 +542,17 @@ impl eframe::App for App {
 
 
                         self.sort_state = SortState::default();
+
+                        match self.db_manager.get_data(&self.sort_state) {
+                            Ok(rows) => {
+                                self.row_data = Some(rows);
+                                self.successfully_loaded_query = Some(true);
+                            }
+                            Err(err) => {
+                                self.successfully_loaded_query = Some(false);
+                                println!("query_load error: {:?}", err);
+                            }
+                        }
                     }
 
 
@@ -636,6 +679,7 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 let sifrant_button = ui.button("Vnos šifrant");
                 let import_button = ui.button("Vnos Poraba 12M, Poraba 3M, Zaloga, Odprta naročila");
+                let dobavitelji_button = ui.button("Vnos dobaviteljev");
                 if import_button.clicked() {
                     let downloads_dir = dirs_next::download_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
                     let files = rfd::FileDialog::new()
@@ -702,6 +746,36 @@ impl eframe::App for App {
                     }
                 }
 
+                if dobavitelji_button.clicked() {
+                    let downloads_dir = dirs_next::download_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
+                    let file = rfd::FileDialog::new()
+                        .set_title("Izberi 1 datoteko!")
+                        .set_directory(downloads_dir)
+                        .pick_file();
+                    if file.is_some() {
+                        let result = parse_dobavitelji_file(file.unwrap());
+                        match result {
+                            Ok(rows) => {
+                                let db_result = self.db_manager.store_dobavitelji_to_db(rows);
+                                match db_result {
+                                    Ok(_) => {
+                                        rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil dobavitelje").set_level(MessageLevel::Info).show();
+                                    },
+                                    Err(err) => {
+                                        println!("Dobavitelji: {:?}", err);
+                                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju dobaviteljev").set_level(MessageLevel::Error).show();
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                println!("{}", e);
+                            }
+                        }
+                    } else {
+                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri dobivanju datoteke").set_level(MessageLevel::Error).show();
+                    }
+                }
+
 
                 let delete = ui.button("Izbriši baze").on_hover_text("Izbriši pred posodabljanjem!");
                 if delete.clicked() {
@@ -744,7 +818,8 @@ impl eframe::App for App {
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::OdprtaNarocila, "Odprto");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::DobavniRok, "Dobava");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaZadostujeZaMesecev, "Zaloga SAP");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Zaloga SAP in odprto");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Zaloga skupaj");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Dobavitelji, "Dobavitelji");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Opomba, "Opomba");
                         });
                     if old_column != self.sort_state.sort_column ||
@@ -773,8 +848,6 @@ pub fn export_filtered_to_excel(
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
 
-
-
     worksheet.write_string(0, 0, "Material")?;
     worksheet.write_string(0, 1, "Naziv")?;
     worksheet.write_string(0, 2, "Nabavnik")?;
@@ -785,8 +858,9 @@ pub fn export_filtered_to_excel(
     worksheet.write_string(0, 7, "Odprto, Odprta naročila dobaviteljem")?;
     worksheet.write_string(0, 8, "Dobava, Predviden dobavni rok v mesecih")?;
     worksheet.write_string(0, 9, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
-    worksheet.write_string(0, 10, "Zaloga SAP in odprto, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
-    worksheet.write_string(0, 11, "Opomba")?;
+    worksheet.write_string(0, 10, "Zaloga skupaj, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
+    worksheet.write_string(0, 11, "Dobavitelji")?;
+    worksheet.write_string(0, 12, "Opomba")?;
 
 
     for (row_idx, item) in data.iter().enumerate() {
@@ -844,9 +918,14 @@ pub fn export_filtered_to_excel(
             None => worksheet.write_blank(row, 10, &Format::default())?,
         };
 
-        match &item.opomba {
+        match &item.dobavitelji {
             Some(s) => worksheet.write_string(row, 11, s)?,
             None => worksheet.write_blank(row, 11, &Format::default())?,
+        };
+
+        match &item.opomba {
+            Some(s) => worksheet.write_string(row, 12, s)?,
+            None => worksheet.write_blank(row, 12, &Format::default())?,
         };
     }
 

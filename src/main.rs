@@ -329,7 +329,7 @@ impl App {
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
                             let t = row.opomba.clone().unwrap_or_else(|| "".to_string());
-                            ui.label(&t).on_hover_text(t);
+                            ui.label(&t);//.on_hover_text(t);
                         });
 
                         table_row.col(|ui| {

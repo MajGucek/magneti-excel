@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use calamine::{open_workbook_auto, DataType, Reader};
 use rfd::{MessageDialog, MessageLevel};
@@ -27,7 +27,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
     }).ok_or("File PORABA 3M.XLSX not found")?;
     let mut workbook = open_workbook_auto(poraba_file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
-    let mut poraba_3m_map: HashMap<i64, f64> = HashMap::new();
+    let mut poraba_3m_map: HashMap<i64, (f64, bool)> = HashMap::new();
     for row in range.rows().skip(1) {
         let material = row.get(1)
             .and_then(DataType::get_string)
@@ -42,9 +42,9 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
 
         let entry = poraba_3m_map
             .entry(material)
-            .or_insert(0.0);
+            .or_insert((0.0, false));
 
-        *entry += klc_v_em_vnosa;
+        entry.0 += klc_v_em_vnosa;
     }
 
 
@@ -54,7 +54,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
     }).ok_or("File PORABA 12M.XLSX not found")?;
     let mut workbook = open_workbook_auto(poraba_file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
-    let mut poraba_12m_map: HashMap<i64, f64> = HashMap::new();
+    let mut poraba_12m_map: HashMap<i64, (f64, bool)> = HashMap::new();
     for row in range.rows().skip(1) {
         let material = row.get(1)
             .and_then(DataType::get_string)
@@ -69,9 +69,9 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
 
         let entry = poraba_12m_map
             .entry(material)
-            .or_insert(0.0);
+            .or_insert((0.0, false));
 
-        *entry += klc_v_em_vnosa;
+        entry.0 += klc_v_em_vnosa;
     }
 
     let odprta_narocila_file = files.iter().find(|&path_buf| {
@@ -79,7 +79,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
     }).ok_or("File ODPRTA_NAROČILA.XLSX not found")?;
     let mut workbook = open_workbook_auto(odprta_narocila_file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
-    let mut dobava_map: HashMap<i64, f64> = HashMap::new();
+    let mut dobava_map: HashMap<i64, (f64, bool)> = HashMap::new();
     for row in range.rows().skip(1) {
         let material = row.get(0)
             .and_then(DataType::get_string)
@@ -94,9 +94,9 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
 
         let entry = dobava_map
             .entry(material)
-            .or_insert(0.);
+            .or_insert((0., false));
 
-        *entry += se_za_dobavo;
+        entry.0 += se_za_dobavo;
     }
 
 
@@ -106,6 +106,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
     let mut workbook = open_workbook_auto(zaloga_file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
     let mut row_data: Vec<RowData> = Vec::with_capacity(100);
+    let mut zaloga_map: HashMap<i64, (f64, bool)> = HashMap::new();
     for row in range.rows().skip(1) {
         let material = row.get(1)
             .and_then(DataType::get_string)
@@ -118,10 +119,52 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
             .map(|f| f)
             .unwrap_or(0.);
 
+        let entry = zaloga_map
+            .entry(material)
+            .or_insert((0., false));
+        entry.0 += zaloga;
+    }
 
-        let poraba_3m = poraba_3m_map.get(&material).unwrap_or(&0.).abs() / 3.;
-        let poraba_12m = poraba_12m_map.get(&material).unwrap_or(&0.).abs() / 12.;
-        let odprta_narocila = *dobava_map.get(&material).unwrap_or(&0.);
+
+    let key_set: HashSet<i64> = poraba_3m_map.keys()
+        .chain(poraba_12m_map.keys())
+        .chain(dobava_map.keys())
+        .chain(zaloga_map.keys())
+        .copied().collect();
+
+    key_set.iter().for_each(|&material| {
+        let poraba_3m = match poraba_3m_map.get_mut(&material) {
+            Some(val) => {
+                val.1 = true;
+                val.0.abs() / 3.
+            }
+            None => 0.
+        };
+
+        let poraba_12m = match poraba_12m_map.get_mut(&material) {
+            Some(val) => {
+                val.1 = true;
+                val.0.abs() / 12.
+            }
+            None => 0.
+        };
+
+        let odprta_narocila = match dobava_map.get_mut(&material) {
+            Some(val) => {
+                val.1 = true;
+                val.0
+            }
+            None => 0.
+        };
+
+        let zaloga = match zaloga_map.get_mut(&material) {
+            Some(val) => {
+                val.1 = true;
+                val.0
+            }
+            None => 0.
+        };
+
 
         row_data.push(RowData {
             material,
@@ -130,7 +173,9 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
             poraba_12m,
             odprta_narocila
         });
-    }
+    });
+
+
 
 
     Ok(row_data)
@@ -159,6 +204,8 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
             .map(|f| f.parse::<i64>().unwrap_or(0))
             .unwrap_or(0);
         if material == 0 { continue; }
+
+
 
         let naziv_materiala = row.get(3)
             .and_then(DataType::get_string)

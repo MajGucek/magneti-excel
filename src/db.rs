@@ -85,7 +85,8 @@ impl DBManager {
                 odprta_narocila = excluded.odprta_narocila
         ")?;
         connection.execute("BEGIN TRANSACTION")?;
-        for row in row_data {
+        for (index, row) in row_data.iter().enumerate() {
+            //println!("{}", index);
             statement.bind((1, row.material))?;
             statement.bind((2, row.zaloga))?;
             statement.bind((3, row.poraba_3m))?;
@@ -95,8 +96,10 @@ impl DBManager {
             statement.reset()?;
         }
         connection.execute("COMMIT")?;
+        //println!("commited!");
 
         self.try_create_view()?;
+        //println!("after try_create_view");
         Ok(())
     }
 

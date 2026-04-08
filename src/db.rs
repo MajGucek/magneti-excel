@@ -85,7 +85,7 @@ impl DBManager {
                 odprta_narocila = excluded.odprta_narocila
         ")?;
         connection.execute("BEGIN TRANSACTION")?;
-        for (index, row) in row_data.iter().enumerate() {
+        for row in row_data {
             //println!("{}", index);
             statement.bind((1, row.material))?;
             statement.bind((2, row.zaloga))?;

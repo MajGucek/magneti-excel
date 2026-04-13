@@ -148,10 +148,10 @@ impl App {
                     let months_left = row.dobavni_rok.map_or(0., |dr| row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - dr);
                     let no_open_orders = row.odprta_narocila.is_some_and(|v| v == 0.);
 
-                    color_matches |= self.filter_rumena && row.dobavni_rok.is_some() && months_left >= 1.5 && months_left < 3. && no_open_orders;
-                    color_matches |= self.filter_oranzna && row.dobavni_rok.is_some() && months_left >= 0.5 && months_left < 1.5 && no_open_orders;
-                    color_matches |= self.filter_rdeca && row.dobavni_rok.is_some() && months_left < 0.5 && no_open_orders;
-                    color_matches |= self.filter_modra_zelena && row.dobavni_rok.is_some() && !no_open_orders;  // has open orders
+                    color_matches |= self.filter_rumena && row.dobavni_rok.is_some() && months_left >= 1.0 && months_left < 1.5 && no_open_orders;
+                    color_matches |= self.filter_oranzna && row.dobavni_rok.is_some() && months_left >= 0.3 && months_left < 1.0 && no_open_orders;
+                    color_matches |= self.filter_rdeca && row.dobavni_rok.is_some() && months_left < 0.3 && no_open_orders;
+                    color_matches |= self.filter_modra_zelena && row.dobavni_rok.is_some() && !no_open_orders;
                 }
                 // ---- //
 
@@ -243,19 +243,22 @@ impl App {
                             }
 
 
-                            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 3. &&
+                            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 &&
                                 row.odprta_narocila.is_some_and(|v| v == 0.) {
+                                // yellow
                                 row_color = Color32::YELLOW;
                             }
 
-                            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 &&
+                            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.0 &&
                                 row.odprta_narocila.is_some_and(|v| v == 0.) {
+                                // orange
                                 row_color = Color32::from_rgb(255, 153, 51);
                             }
 
-                            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.5 &&
+                            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.3 &&
                                 row.odprta_narocila.is_some_and(|v| v == 0.) {
-                                row_color = Color32::from_rgb(255, 51, 51);
+                                // red
+                                row_color = Color32::from_rgb(255, 135, 135);
                             }
                         }
 

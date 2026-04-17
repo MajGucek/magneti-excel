@@ -12,6 +12,9 @@ impl DBManager {
         self.create_sifrant_table(&connection)?;
         self.create_opomba_table(&connection)?;
         self.create_dobavni_rok_table(&connection)?;
+        self.create_min_zaloga_table(&connection)?;
+        self.create_max_zaloga_table(&connection)?;
+        self.create_blagovna_skupina_table(&connection)?;
 
         Ok(())
     }
@@ -37,8 +40,8 @@ impl DBManager {
                         CASE
                             WHEN poraba_3m = 0 OR poraba_3m IS NULL THEN
                             CASE
-                                WHEN poraba_12m = 0 OR poraba_12m IS NULL THEN NULL
-                                ELSE zaloga / poraba_12m
+                                WHEN poraba_24m = 0 OR poraba_24m IS NULL THEN NULL
+                                ELSE zaloga / poraba_24m
                             END
                             ELSE zaloga / poraba_3m
                         END
@@ -48,8 +51,8 @@ impl DBManager {
                         CASE
                             WHEN poraba_3m = 0 OR poraba_3m IS NULL THEN
                             CASE
-                                WHEN poraba_12m = 0 OR poraba_12m IS NULL THEN NULL
-                                ELSE (zaloga + odprta_narocila) / poraba_12m
+                                WHEN poraba_24m = 0 OR poraba_24m IS NULL THEN NULL
+                                ELSE (zaloga + odprta_narocila) / poraba_24m
                             END
                             ELSE (zaloga + odprta_narocila) / poraba_3m
                         END
@@ -78,10 +81,10 @@ impl DBManager {
         self.create_data_table(&connection)?;
 
         let mut statement = connection.prepare("
-            INSERT INTO data (material, zaloga, poraba_3m, poraba_12m, odprta_narocila) VALUES (?, ?, ?, ?, ?) ON CONFLICT(material) DO UPDATE SET
+            INSERT INTO data (material, zaloga, poraba_3m, poraba_24m, odprta_narocila) VALUES (?, ?, ?, ?, ?) ON CONFLICT(material) DO UPDATE SET
                 zaloga = excluded.zaloga,
                 poraba_3m = excluded.poraba_3m,
-                poraba_12m = excluded.poraba_12m,
+                poraba_24m = excluded.poraba_24m,
                 odprta_narocila = excluded.odprta_narocila
         ")?;
         connection.execute("BEGIN TRANSACTION")?;
@@ -90,7 +93,7 @@ impl DBManager {
             statement.bind((1, row.material))?;
             statement.bind((2, row.zaloga))?;
             statement.bind((3, row.poraba_3m))?;
-            statement.bind((4, row.poraba_12m))?;
+            statement.bind((4, row.poraba_24m))?;
             statement.bind((5, row.odprta_narocila))?;
             statement.next()?;
             statement.reset()?;
@@ -127,13 +130,14 @@ impl DBManager {
         ")?;
 
         connection.execute("BEGIN TRANSACTION")?;
-        for dobavitelj_row in rows {
+        for (index, dobavitelj_row) in rows.iter().enumerate() {
+            println!("index: {}", index);
             statement.bind((1, dobavitelj_row.material))?;
             statement.bind(&[(2, dobavitelj_row.dobavitelj.as_str())][..])?;
             statement.next()?;
             statement.reset()?;
         }
-
+        println!("finished");
         connection.execute("COMMIT")?;
 
         self.try_create_view()?;
@@ -216,6 +220,99 @@ impl DBManager {
     }
 
 
+    fn create_blagovna_skupina_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS blagovne_skupine (
+                material INTEGER PRIMARY KEY ,
+                blagovna_skupina TEXT NOT NULL
+            );
+        ")?;
+
+        connection.execute("COMMIT")?;
+        Ok(())
+    }
+
+    pub fn store_blagovna_skupina(&self, blagovna_skupina: (i64, String)) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_blagovna_skupina_table(&connection)?;
+
+        let mut statement = connection.prepare("
+            INSERT INTO blagovne_skupine (material, blagovna_skupina) VALUES (?, ?) ON CONFLICT(material) DO UPDATE SET blagovna_skupina = excluded.blagovna_skupina
+        ")?;
+        connection.execute("BEGIN TRANSACTION")?;
+        statement.bind((1, blagovna_skupina.0))?;
+        statement.bind((2, blagovna_skupina.1.as_str()))?;
+        statement.next()?;
+        connection.execute("COMMIT")?;
+
+
+        self.try_create_view()?;
+        Ok(())
+    }
+
+
+    fn create_min_zaloga_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS minimalne_zaloge (
+                material INTEGER PRIMARY KEY,
+                minimalna_zaloga REAL
+            );
+        ")?;
+
+        connection.execute("COMMIT")?;
+        Ok(())
+    }
+
+    pub fn store_min_zaloga(&self, min_zaloga_row: (i64, Option<f64>)) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_min_zaloga_table(&connection)?;
+
+        let mut statement = connection.prepare("
+        INSERT INTO minimalne_zaloge (material, minimalna_zaloga) VALUES (?, ?) ON CONFLICT(material) DO UPDATE SET minimalna_zaloga = excluded.minimalna_zaloga
+    ")?;
+        connection.execute("BEGIN TRANSACTION")?;
+        statement.bind((1, min_zaloga_row.0))?;
+        statement.bind((2, min_zaloga_row.1))?;
+        statement.next()?;
+        connection.execute("COMMIT")?;
+
+
+        self.try_create_view()?;
+        Ok(())
+    }
+
+    fn create_max_zaloga_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS maximalne_zaloge (
+                material INTEGER PRIMARY KEY,
+                maximalna_zaloga REAL
+            );
+        ")?;
+
+        connection.execute("COMMIT")?;
+        Ok(())
+    }
+
+    pub fn store_max_zaloga(&self, max_zaloga_row: (i64, Option<f64>)) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_max_zaloga_table(&connection)?;
+
+        let mut statement = connection.prepare("
+        INSERT INTO maximalne_zaloge (material, maximalna_zaloga) VALUES (?, ?) ON CONFLICT(material) DO UPDATE SET maximalna_zaloga = excluded.maximalna_zaloga
+    ")?;
+        connection.execute("BEGIN TRANSACTION")?;
+        statement.bind((1, max_zaloga_row.0))?;
+        statement.bind((2, max_zaloga_row.1))?;
+        statement.next()?;
+        connection.execute("COMMIT")?;
+
+
+        self.try_create_view()?;
+        Ok(())
+    }
 
 
     fn create_dobavni_rok_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
@@ -249,6 +346,9 @@ impl DBManager {
         self.try_create_view()?;
         Ok(())
     }
+
+
+
 
     pub fn drop_all_tables(&self) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
@@ -287,12 +387,15 @@ impl DBManager {
                 s.mrp_karakteristika,
                 d.zaloga,
                 d.poraba_3m,
-                d.poraba_12m,
+                d.poraba_24m,
                 d.odprta_narocila,
                 c.dobavni_rok,
                 d.trenutna_zaloga_zadostuje_za_mesecev,
                 d.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev,
                 COALESCE(dob.dobavitelji_list, ' ') AS dobavitelji,
+                min_z.minimalna_zaloga,
+                max_z.maximalna_zaloga,
+                blag_s.blagovna_skupina,
                 o.opomba
             FROM sifrant s
             LEFT JOIN data d ON s.material = d.material
@@ -303,6 +406,9 @@ impl DBManager {
                 LTRIM(GROUP_CONCAT(dobavitelj, ', '), ', ') AS dobavitelji_list
                 FROM dobavitelji GROUP BY material
             ) dob ON s.material = dob.material
+            LEFT JOIN minimalne_zaloge min_z ON s.material = min_z.material
+            LEFT JOIN maximalne_zaloge max_z ON s.material = max_z.material
+            LEFT JOIN blagovne_skupine blag_s ON s.material = blag_s.material
             ;
         ")?;
         Ok(())
@@ -324,12 +430,15 @@ pub struct ViewQuery {
     pub mrp_karakteristika: Option<String>,
     pub zaloga: Option<f64>,
     pub poraba_3m: Option<f64>,
-    pub poraba_12m: Option<f64>,
+    pub poraba_24m: Option<f64>,
     pub odprta_narocila: Option<f64>,
     pub dobavni_rok: Option<f64>,
     pub trenutna_zaloga_zadostuje_za_mesecev: Option<f64>,
     pub trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev: Option<f64>,
     pub dobavitelji: Option<String>,
+    pub minimalna_zaloga: Option<f64>,
+    pub maximalna_zaloga: Option<f64>,
+    pub blagovna_skupina: Option<String>,
     pub opomba: Option<String>,
 }
 
@@ -350,13 +459,16 @@ impl ViewQuery {
             row.mrp_karakteristika = statement.read(3)?;
             row.zaloga = statement.read(4)?;
             row.poraba_3m = statement.read(5)?;
-            row.poraba_12m = statement.read(6)?;
+            row.poraba_24m = statement.read(6)?;
             row.odprta_narocila = statement.read(7)?;
             row.dobavni_rok = statement.read(8)?;
             row.trenutna_zaloga_zadostuje_za_mesecev = statement.read(9)?;
             row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev = statement.read(10)?;
             row.dobavitelji = statement.read(11)?;
-            row.opomba = statement.read(12)?;
+            row.minimalna_zaloga = statement.read(12)?;
+            row.maximalna_zaloga = statement.read(13)?;
+            row.blagovna_skupina = statement.read(14)?;
+            row.opomba = statement.read(15)?;
             rows.push(row);
         }
 
@@ -374,12 +486,15 @@ pub enum SortColumn {
     _MRP,
     Zaloga,
     Poraba3M,
-    Poraba12M,
+    Poraba24M,
     OdprtaNarocila,
     DobavniRok,
     TrenutnaZalogaZadostujeZaMesecev,
     TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev,
     Dobavitelji,
+    MinimalnaZaloga,
+    MaximalnaZaloga,
+    BlagovnaSkupina,
     Opomba,
 }
 
@@ -392,12 +507,15 @@ impl SortColumn {
             SortColumn::_MRP => "mrp_karakteristika",
             SortColumn::Zaloga => "zaloga",
             SortColumn::Poraba3M => "poraba_3m",
-            SortColumn::Poraba12M => "poraba_12m",
+            SortColumn::Poraba24M => "poraba_24m",
             &SortColumn::OdprtaNarocila => "odprta_narocila",
             SortColumn::DobavniRok => "dobavni_rok",
             SortColumn::TrenutnaZalogaZadostujeZaMesecev => "trenutna_zaloga_zadostuje_za_mesecev",
             SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => "trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev",
             SortColumn::Dobavitelji => "dobavitelji",
+            SortColumn::MinimalnaZaloga => "minimalna_zaloga",
+            SortColumn::MaximalnaZaloga => "maximalna_zaloga",
+            SortColumn::BlagovnaSkupina => "blagovna_skupina",
             SortColumn::Opomba => "opomba",
         }
     }

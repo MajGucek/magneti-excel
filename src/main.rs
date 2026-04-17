@@ -14,7 +14,7 @@ use crate::parse::{parse_dobavitelji_file, parse_import_files, parse_sifrant_fil
 struct App {
     db_manager: DBManager,
 
-    row_data: Option<Vec<ViewQuery>>,
+    row_data: Rows,
     successfully_loaded_query: Option<bool>,
     sort_state: SortState,
 
@@ -57,6 +57,8 @@ struct App {
     filter_dobavni_rok_gt: String,
 
     filter_opomba: bool,
+
+
 }
 
 impl App {
@@ -92,7 +94,7 @@ impl App {
 
         Self {
             db_manager,
-            row_data,
+            row_data: Rows {row_data},
             successfully_loaded_query,
             sort_state,
 
@@ -114,19 +116,19 @@ impl App {
             filter_nabavnik: String::new(),
             filter_dobavitelj: String::new(),
 
-            filter_zaloga_vecja: true,
+            filter_zaloga_vecja: false,
             filter_zaloga_gt: String::from("0"),
 
-            filter_nabavnik_definiran: true,
+            filter_nabavnik_definiran: false,
             filter_nabavnik_ni_definiran: false,
 
-            filter_poraba_vecja: true,
+            filter_poraba_vecja: false,
             filter_poraba_gt: String::from("0"),
 
             filter_odprta_narocila: false,
             filter_odprta_narocila_gt: String::from("0"),
 
-            filter_dobavni_rok: false,
+            filter_dobavni_rok: true,
             filter_dobavni_rok_gt: String::from("0"),
 
             filter_opomba: false,
@@ -136,7 +138,30 @@ impl App {
 }
 
 
+struct Rows {
+    row_data: Option<Vec<ViewQuery>>
+}
+
+impl Rows {
+    fn query(&mut self, db_manager: &DBManager, sort_state: &SortState) -> Option<bool> {
+        match db_manager.get_data(&sort_state) {
+            Ok(rows) => {
+                self.row_data = Some(rows);
+                Some(true)
+            }
+            Err(err) => {
+                println!("query_load error: {:?}", err);
+                Some(false)
+            }
+        }
+    }
+}
+
+
 impl App {
+
+
+
     fn apply_filters(&self, rows: &Vec<ViewQuery>) -> Vec<ViewQuery> {
 
         rows.iter()
@@ -170,7 +195,12 @@ impl App {
 
                 format!("{}", row.material).contains(self.filter_sifra_materiala.as_str()) &&
                     row.naziv_materiala.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_naziv_materiala.to_lowercase().as_str())) &&
-                    row.nabavna_skupina.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_nabavnik.to_lowercase().as_str())) &&
+
+                    (row.nabavna_skupina.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_nabavnik.to_lowercase().as_str())) ||
+                        row.nabavna_skupina.as_ref().is_some_and(|a| format!("{}", format_nabavnik(a).unwrap_or(a).to_lowercase()).contains(self.filter_nabavnik.to_lowercase().as_str())
+                        )
+                    ) &&
+
                     row.dobavitelji.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_dobavitelj.to_lowercase().as_str())) &&
                     condition &&
 
@@ -205,9 +235,8 @@ impl App {
                 .columns(Column::exact(120.), 1)// Zaloga skupaj
                 .columns(Column::exact(300.), 1)// Opomba
                 .columns(Column::exact(90.), 1)// Nabavnik
-                .columns(Column::exact(300.), 1)//Dobavitelji
+                .columns(Column::remainder(), 1)//Dobavitelji
 
-                .columns(Column::remainder(), 1)// MRP
                 .header(50.0, |mut header| {
                     header.col(|ui| {ui.heading("Material"); });
                     header.col(|ui| {ui.heading("Naziv"); });
@@ -215,16 +244,18 @@ impl App {
 
                     header.col(|ui| {ui.heading("Zaloga").on_hover_text("Trenutna zaloga v SAP-u"); });
                     header.col(|ui| {ui.heading("Poraba 3M").on_hover_text("Povprečna mesečna poraba za zadnje 3 mesece"); });
-                    header.col(|ui| {ui.heading("Poraba 12M").on_hover_text("Povprečna mesečna poraba za zadnjih 12 mesecev"); });
+                    header.col(|ui| {ui.heading("Poraba 24M").on_hover_text("Povprečna mesečna poraba za zadnjih 12 mesecev"); });
                     header.col(|ui| {ui.heading("Odprto").on_hover_text("Odprta naročila dobaviteljem"); });
                     header.col(|ui| {ui.heading("Dobava").on_hover_text("Predviden dobavni rok v mesecih"); });
-                    header.col(|ui| {ui.heading("Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev"); });
-                    header.col(|ui| {ui.heading("Zaloga skupaj").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev"); });
+
+                    header.col(|ui| {ui.heading("Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
+
+                    header.col(|ui| {ui.heading("Zaloga skupaj").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
 
                     header.col(|ui| {ui.heading("Opomba"); });
-                    header.col(|ui| {ui.heading("Nabavnik").on_hover_text("002 Neli\n008 Alenka/Viktorija\n010 Boštjan"); });
+                    header.col(|ui| {ui.heading("Nabavnik").on_hover_text("002 Neli\n008 Viktorija\n010 Boštjan"); });
                     header.col(|ui| {ui.heading("Dobavitelji"); });
-                    header.col(|ui| {ui.heading("MRP"); });
+                    //header.col(|ui| {ui.heading("MRP"); });
                 })
                 .body(|body| {
                     body.rows(25., data.len(), |mut table_row| {
@@ -233,13 +264,15 @@ impl App {
                         let row = &data[index];
 
                         let mut row_color = Color32::TRANSPARENT;
-                        if !row.dobavni_rok.is_none() {
+                        if row.dobavni_rok.is_some() {
                             if row.odprta_narocila.is_some_and(|v| v != 0.) {
                                 if row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.) <= row.dobavni_rok.unwrap_or(0.) {
                                     row_color = Color32::LIGHT_BLUE;
                                 } else {
                                     row_color = Color32::LIGHT_GREEN;
                                 }
+                            } else if row.dobavni_rok.unwrap_or(0.) >= 90. {
+                                row_color = Color32::from_rgb(191, 136, 187);
                             }
 
 
@@ -261,6 +294,11 @@ impl App {
                                 row_color = Color32::from_rgb(255, 135, 135);
                             }
                         }
+
+
+
+
+
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
@@ -337,25 +375,40 @@ impl App {
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.nabavna_skupina.clone().unwrap_or_else(|| "".to_string()));
+                            let nabavna_skupina = row.nabavna_skupina.clone().unwrap_or_else(|| "".to_string());
+
+                            ui.label(format_nabavnik(nabavna_skupina.as_str()).unwrap_or(nabavna_skupina.as_str()));
                         });
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
                             let t = row.dobavitelji.clone().unwrap_or_else(|| "".to_string());
-                            ui.label(&t);//.on_hover_text(t);
+                            ui.label(&t);
                         });
 
+                        /*
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
                             ui.label(row.mrp_karakteristika.clone().unwrap_or_else(|| "".to_string()));
                         });
+
+                         */
 
                     });
                 });
         });
     }
 }
+
+fn format_nabavnik<'a>(nabavna_skupina: &str) -> Option<&'a str> {
+    match nabavna_skupina {
+            "002" => Some("Neli"),
+            "008" => Some("Viktoria"),
+            "010" => Some("Boštjan"),
+            _ => None,
+        }
+}
+
 
 fn format_number_custom(value: f64) -> String {
     let s = format!("{:.2}", value);
@@ -383,6 +436,7 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint();
 
+
         CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
                 if let Some(success) = self.successfully_loaded_query {
@@ -390,23 +444,14 @@ impl eframe::App for App {
                     ui.colored_label(color, "■");
                 }
                 if ui.button("Naloži").clicked() {
-                    match self.db_manager.get_data(&self.sort_state) {
-                        Ok(rows) => {
-                            self.row_data = Some(rows);
-                            self.successfully_loaded_query = Some(true);
-                        }
-                        Err(err) => {
-                            self.successfully_loaded_query = Some(false);
-                            println!("query_load error: {:?}", err);
-                        }
-                    }
+                    self.row_data.query(&self.db_manager, &self.sort_state);
                 }
 
                 ui.horizontal(|ui| {
                     if ui.button("Izvozi").clicked() {
                         let mut resp: Result<(), Box<dyn std::error::Error>> = Ok(());
 
-                        let _ = self.row_data.as_ref().map(|d| { resp = export_filtered_to_excel(&self.apply_filters(&d)); });
+                        let _ = self.row_data.row_data.as_ref().map(|d| { resp = export_filtered_to_excel(&self.apply_filters(&d)); });
                         match resp {
                             Err(err) => {
                                 println!("export error: {:?}", err);
@@ -421,7 +466,7 @@ impl eframe::App for App {
 
             });
 
-            let data = match &self.row_data {
+            let data = match &self.row_data.row_data {
                 Some(d) => self.apply_filters(d),
                 None => Vec::new(),
             };
@@ -436,10 +481,8 @@ impl eframe::App for App {
             });
         });
 
-
         Window::new("Filtri")
             .resizable(false)
-            .collapsible(true)
             .default_open(false)
             .fixed_pos(pos2(80., 5.))
             .order(Order::Middle)
@@ -546,24 +589,13 @@ impl eframe::App for App {
 
                         self.sort_state = SortState::default();
 
-                        match self.db_manager.get_data(&self.sort_state) {
-                            Ok(rows) => {
-                                self.row_data = Some(rows);
-                                self.successfully_loaded_query = Some(true);
-                            }
-                            Err(err) => {
-                                self.successfully_loaded_query = Some(false);
-                                println!("query_load error: {:?}", err);
-                            }
-                        }
+
                     }
-
-
                 });
-
             });
 
-        Window::new("Dobavni rok")
+
+        Window::new("Ročni Vnosi")
             .resizable(false)
             .collapsible(true)
             .default_open(false)
@@ -598,34 +630,12 @@ impl eframe::App for App {
                             }
                         }
 
-                        let result = self.db_manager.get_data(&self.sort_state);
-
-                        match result {
-                            Err(err) => {
-                                println!("query_load error after dobavni rok update: {:?}", err.to_string());
-                                self.successfully_loaded_query = Some(false);
-                            },
-                            Ok(rows) => {
-                                self.row_data = Some(rows);
-                                println!("row_data loaded: {}", self.row_data.as_ref().unwrap().len());
-                                self.successfully_loaded_query = Some(true);
-                            }
-                        }
+                        self.row_data.query(&self.db_manager, &self.sort_state);
                     }
-                });
-
-            });
 
 
-        Window::new("Opombe")
-            .resizable(false)
-            .collapsible(true)
-            .default_open(false)
-            .fixed_pos(pos2(350., 5.))
-            .order(Order::Middle)
-            .default_size(vec2(300., 200.))
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
+                    ui.add_space(10.);
+
                     ui.add(
                         TextEdit::singleline(&mut self.opomba_material)
                             .hint_text("Šifra materiala...")
@@ -651,23 +661,13 @@ impl eframe::App for App {
                             }
                         }
 
-                        let result = self.db_manager.get_data(&self.sort_state);
-
-                        match result {
-                            Err(err) => {
-                                println!("query_load error after opomba update: {:?}", err.to_string());
-                                self.successfully_loaded_query = Some(false);
-                            },
-                            Ok(rows) => {
-                                self.row_data = Some(rows);
-                                println!("row_data loaded: {}", self.row_data.as_ref().unwrap().len());
-                                self.successfully_loaded_query = Some(true);
-                            }
-                        }
+                        self.row_data.query(&self.db_manager, &self.sort_state);
                     }
                 });
 
             });
+
+
 
 
 
@@ -814,7 +814,7 @@ impl eframe::App for App {
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Material, "Material");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::NazivMateriala, "Naziv");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::NabavnaSkupina, "Nabavnik");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::MRP, "MRP");
+                            //ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::MRP, "MRP");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Zaloga, "Zaloga");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Poraba3M, "Poraba 3M");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Poraba12M, "Poraba 12M");
@@ -828,16 +828,7 @@ impl eframe::App for App {
                     if old_column != self.sort_state.sort_column ||
                         ui.checkbox(&mut self.sort_state.descending, "Padajoče").changed()
                     {
-                        match self.db_manager.get_data(&self.sort_state) {
-                            Ok(rows) => {
-                                self.row_data = Some(rows);
-                                self.successfully_loaded_query = Some(true);
-                            }
-                            Err(err) => {
-                                println!("sort query error: {:?}", err);
-                                self.successfully_loaded_query = Some(false);
-                            }
-                        }
+                        self.row_data.query(&self.db_manager, &self.sort_state);
                     }
                 });
             });
@@ -854,16 +845,16 @@ pub fn export_filtered_to_excel(
     worksheet.write_string(0, 0, "Material")?;
     worksheet.write_string(0, 1, "Naziv")?;
     worksheet.write_string(0, 2, "Nabavnik")?;
-    worksheet.write_string(0, 3, "MRP")?;
-    worksheet.write_string(0, 4, "Zaloga")?;
-    worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnje 3 mesece")?;
-    worksheet.write_string(0, 6, "Poraba, Povprečna mesečna poraba za zadnjih 12 mesecev")?;
-    worksheet.write_string(0, 7, "Odprto, Odprta naročila dobaviteljem")?;
-    worksheet.write_string(0, 8, "Dobava, Predviden dobavni rok v mesecih")?;
-    worksheet.write_string(0, 9, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
-    worksheet.write_string(0, 10, "Zaloga skupaj, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev")?;
-    worksheet.write_string(0, 11, "Dobavitelji")?;
-    worksheet.write_string(0, 12, "Opomba")?;
+    //worksheet.write_string(0, 3, "MRP")?;
+    worksheet.write_string(0, 3, "Zaloga")?;
+    worksheet.write_string(0, 4, "Poraba, Povprečna mesečna poraba za zadnje 3 mesece")?;
+    worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnjih 12 mesecev")?;
+    worksheet.write_string(0, 6, "Odprto, Odprta naročila dobaviteljem")?;
+    worksheet.write_string(0, 7, "Dobava, Predviden dobavni rok v mesecih")?;
+    worksheet.write_string(0, 8, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe")?;
+    worksheet.write_string(0, 9, "Zaloga skupaj, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe")?;
+    worksheet.write_string(0, 10, "Dobavitelji")?;
+    worksheet.write_string(0, 11, "Opomba")?;
 
 
     for (row_idx, item) in data.iter().enumerate() {
@@ -880,11 +871,13 @@ pub fn export_filtered_to_excel(
             Some(s) => worksheet.write_string(row, 2, s)?,
             None => worksheet.write_blank(row, 2, &Format::default())?,
         };
-
+        /*
         match &item.mrp_karakteristika {
             Some(s) => worksheet.write_string(row, 3, s)?,
             None => worksheet.write_blank(row, 3, &Format::default())?,
         };
+
+         */
 
         match item.zaloga {
             Some(v) => worksheet.write_number(row, 4, v)?,

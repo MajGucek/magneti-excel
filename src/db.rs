@@ -30,7 +30,7 @@ impl DBManager {
                 material INTEGER PRIMARY KEY,
                 zaloga REAL,
                 poraba_3m REAL,
-                poraba_12m REAL,
+                poraba_24m REAL,
                 odprta_narocila REAL,
                 trenutna_zaloga_zadostuje_za_mesecev REAL
                     GENERATED ALWAYS AS (
@@ -371,7 +371,7 @@ pub enum SortColumn {
     Material,
     NazivMateriala,
     NabavnaSkupina,
-    MRP,
+    _MRP,
     Zaloga,
     Poraba3M,
     Poraba12M,
@@ -389,7 +389,7 @@ impl SortColumn {
             SortColumn::Material => "material",
             SortColumn::NazivMateriala => "naziv_materiala",
             SortColumn::NabavnaSkupina => "nabavna_skupina",
-            SortColumn::MRP => "mrp_karakteristika",
+            SortColumn::_MRP => "mrp_karakteristika",
             SortColumn::Zaloga => "zaloga",
             SortColumn::Poraba3M => "poraba_3m",
             SortColumn::Poraba12M => "poraba_12m",

@@ -172,6 +172,7 @@ fn is_within_last_months(date: &NaiveDate, months: u32) -> bool {
 pub struct SifrantRow {
     pub material: i64,
     pub naziv_materiala: String,
+    pub osnovna_merska_enota: String,
     pub nabavna_skupina: String,
     pub mrp_karakteristika: String,
 }
@@ -195,6 +196,10 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
             .and_then(DataType::get_string)
             .unwrap_or("").to_string();
 
+        let osnovna_merska_enota = row.get(7)
+            .and_then(DataType::get_string)
+            .unwrap_or("").to_string();
+
         let nabavna_skupina = row.get(8)
             .and_then(DataType::get_string)
             .unwrap_or("").to_string();
@@ -206,6 +211,7 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
         row_data.push(SifrantRow {
             material,
             naziv_materiala,
+            osnovna_merska_enota,
             nabavna_skupina,
             mrp_karakteristika,
         });

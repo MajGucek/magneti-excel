@@ -15,6 +15,7 @@ impl DBManager {
         self.create_min_zaloga_table(&connection)?;
         self.create_max_zaloga_table(&connection)?;
         self.create_blagovna_skupina_table(&connection)?;
+        self.create_pakiranje_table(&connection)?;
 
         Ok(())
     }
@@ -151,6 +152,7 @@ impl DBManager {
             CREATE TABLE IF NOT EXISTS sifrant (
                 material INTEGER PRIMARY KEY ,
                 naziv_materiala TEXT,
+                osnovna_merska_enota TEXT,
                 nabavna_skupina TEXT,
                 mrp_karakteristika TEXT
             );
@@ -166,7 +168,7 @@ impl DBManager {
         self.create_sifrant_table(&connection)?;
 
         let mut statement = connection.prepare("
-            INSERT INTO sifrant (material, naziv_materiala, nabavna_skupina, mrp_karakteristika) VALUES (?, ?, ?, ?)
+            INSERT INTO sifrant (material, naziv_materiala, osnovna_merska_enota, nabavna_skupina, mrp_karakteristika) VALUES (?, ?, ?, ?, ?)
         ")?;
 
         connection.execute("BEGIN TRANSACTION")?;
@@ -174,8 +176,9 @@ impl DBManager {
             println!("index: {}", index);
             statement.bind((1, sifrant_row.material))?;
             statement.bind(&[(2, sifrant_row.naziv_materiala.as_str())][..])?;
-            statement.bind(&[(3, sifrant_row.nabavna_skupina.as_str())][..])?;
-            statement.bind(&[(4, sifrant_row.mrp_karakteristika.as_str())][..])?;
+            statement.bind(&[(3, sifrant_row.osnovna_merska_enota.as_str())][..])?;
+            statement.bind(&[(4, sifrant_row.nabavna_skupina.as_str())][..])?;
+            statement.bind(&[(5, sifrant_row.mrp_karakteristika.as_str())][..])?;
             statement.next()?;
             statement.reset()?;
         }
@@ -186,6 +189,37 @@ impl DBManager {
         Ok(())
     }
 
+
+    fn create_pakiranje_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS pakiranja (
+                material INTEGER PRIMARY KEY ,
+                pakiranje TEXT NOT NULL
+            );
+        ")?;
+
+        connection.execute("COMMIT")?;
+        Ok(())
+    }
+
+    pub fn store_pakiranje(&self, pakiranje: (i64, String)) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_pakiranje_table(&connection)?;
+
+        let mut statement = connection.prepare("
+            INSERT INTO pakiranja (material, pakiranje) VALUES (?, ?) ON CONFLICT(material) DO UPDATE SET pakiranje = excluded.pakiranje
+        ")?;
+        connection.execute("BEGIN TRANSACTION")?;
+        statement.bind((1, pakiranje.0))?;
+        statement.bind((2, pakiranje.1.as_str()))?;
+        statement.next()?;
+        connection.execute("COMMIT")?;
+
+
+        self.try_create_view()?;
+        Ok(())
+    }
 
     fn create_opomba_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         connection.execute("BEGIN TRANSACTION")?;
@@ -383,6 +417,7 @@ impl DBManager {
             SELECT
                 s.material,
                 s.naziv_materiala,
+                s.osnovna_merska_enota,
                 s.nabavna_skupina,
                 s.mrp_karakteristika,
                 d.zaloga,
@@ -396,6 +431,7 @@ impl DBManager {
                 min_z.minimalna_zaloga,
                 max_z.maximalna_zaloga,
                 blag_s.blagovna_skupina,
+                pak.pakiranje,
                 o.opomba
             FROM sifrant s
             LEFT JOIN data d ON s.material = d.material
@@ -409,6 +445,7 @@ impl DBManager {
             LEFT JOIN minimalne_zaloge min_z ON s.material = min_z.material
             LEFT JOIN maximalne_zaloge max_z ON s.material = max_z.material
             LEFT JOIN blagovne_skupine blag_s ON s.material = blag_s.material
+            LEFT JOIN pakiranja pak ON s.material = pak.material
             ;
         ")?;
         Ok(())
@@ -426,6 +463,7 @@ impl DBManager {
 pub struct ViewQuery {
     pub material: i64,
     pub naziv_materiala: Option<String>,
+    pub osnovna_merska_enota: Option<String>,
     pub nabavna_skupina: Option<String>,
     pub mrp_karakteristika: Option<String>,
     pub zaloga: Option<f64>,
@@ -439,6 +477,7 @@ pub struct ViewQuery {
     pub minimalna_zaloga: Option<f64>,
     pub maximalna_zaloga: Option<f64>,
     pub blagovna_skupina: Option<String>,
+    pub pakiranje: Option<String>,
     pub opomba: Option<String>,
 }
 
@@ -455,20 +494,22 @@ impl ViewQuery {
             let mut row = ViewQuery::default();
             row.material = statement.read(0)?;
             row.naziv_materiala = statement.read(1)?;
-            row.nabavna_skupina = statement.read(2)?;
-            row.mrp_karakteristika = statement.read(3)?;
-            row.zaloga = statement.read(4)?;
-            row.poraba_3m = statement.read(5)?;
-            row.poraba_24m = statement.read(6)?;
-            row.odprta_narocila = statement.read(7)?;
-            row.dobavni_rok = statement.read(8)?;
-            row.trenutna_zaloga_zadostuje_za_mesecev = statement.read(9)?;
-            row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev = statement.read(10)?;
-            row.dobavitelji = statement.read(11)?;
-            row.minimalna_zaloga = statement.read(12)?;
-            row.maximalna_zaloga = statement.read(13)?;
-            row.blagovna_skupina = statement.read(14)?;
-            row.opomba = statement.read(15)?;
+            row.osnovna_merska_enota = statement.read(2)?;
+            row.nabavna_skupina = statement.read(3)?;
+            row.mrp_karakteristika = statement.read(4)?;
+            row.zaloga = statement.read(5)?;
+            row.poraba_3m = statement.read(6)?;
+            row.poraba_24m = statement.read(7)?;
+            row.odprta_narocila = statement.read(8)?;
+            row.dobavni_rok = statement.read(9)?;
+            row.trenutna_zaloga_zadostuje_za_mesecev = statement.read(10)?;
+            row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev = statement.read(11)?;
+            row.dobavitelji = statement.read(12)?;
+            row.minimalna_zaloga = statement.read(13)?;
+            row.maximalna_zaloga = statement.read(14)?;
+            row.blagovna_skupina = statement.read(15)?;
+            row.pakiranje = statement.read(16)?;
+            row.opomba = statement.read(17)?;
             rows.push(row);
         }
 
@@ -482,6 +523,7 @@ pub enum SortColumn {
     #[default]
     Material,
     NazivMateriala,
+    OsnovnaMerskaEnota,
     NabavnaSkupina,
     _MRP,
     Zaloga,
@@ -495,6 +537,7 @@ pub enum SortColumn {
     MinimalnaZaloga,
     MaximalnaZaloga,
     BlagovnaSkupina,
+    Pakiranje,
     Opomba,
 }
 
@@ -503,6 +546,7 @@ impl SortColumn {
         match self {
             SortColumn::Material => "material",
             SortColumn::NazivMateriala => "naziv_materiala",
+            SortColumn::OsnovnaMerskaEnota => "osnovna_merska_enota",
             SortColumn::NabavnaSkupina => "nabavna_skupina",
             SortColumn::_MRP => "mrp_karakteristika",
             SortColumn::Zaloga => "zaloga",
@@ -516,6 +560,7 @@ impl SortColumn {
             SortColumn::MinimalnaZaloga => "minimalna_zaloga",
             SortColumn::MaximalnaZaloga => "maximalna_zaloga",
             SortColumn::BlagovnaSkupina => "blagovna_skupina",
+            SortColumn::Pakiranje => "pakiranje",
             SortColumn::Opomba => "opomba",
         }
     }

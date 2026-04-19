@@ -34,6 +34,9 @@ struct App {
     blagovna_skupina_material: String,
     blagovna_skupina_blagovna_skupina: String,
 
+    pakiranje_material: String,
+    pakiranje_pakiranje: String,
+
 
     /* --Columns-- */
 
@@ -70,7 +73,14 @@ struct App {
     filter_dobavni_rok: bool,
     filter_dobavni_rok_gt: String,
 
+    filter_min_zaloga: bool,
+    filter_min_zaloga_gt: String,
+
+    filter_max_zaloga: bool,
+    filter_max_zaloga_gt: String,
+
     filter_opomba: bool,
+    filter_no_dobavni_rok: bool,
 
 
 }
@@ -128,6 +138,9 @@ impl App {
             blagovna_skupina_material: String::new(),
             blagovna_skupina_blagovna_skupina: String::new(),
 
+            pakiranje_material: String::new(),
+            pakiranje_pakiranje: String::new(),
+
 
             filter_rdeca: false,
             filter_oranzna: false,
@@ -160,7 +173,14 @@ impl App {
             filter_dobavni_rok: true,
             filter_dobavni_rok_gt: String::from("0"),
 
+            filter_min_zaloga: false,
+            filter_min_zaloga_gt: String::from("0"),
+
+            filter_max_zaloga: false,
+            filter_max_zaloga_gt: String::from("0"),
+
             filter_opomba: false,
+            filter_no_dobavni_rok: false,
         }
     }
 
@@ -255,10 +275,14 @@ impl App {
 
                     (!self.filter_odprta_narocila || row.odprta_narocila.is_some_and(|odp| odp > parse_string_to_optional_f64(self.filter_odprta_narocila_gt.as_str()).unwrap_or(0.))) &&
                     (!self.filter_dobavni_rok || row.dobavni_rok.is_some_and(|dob| dob > parse_string_to_optional_f64(self.filter_dobavni_rok_gt.as_str()).unwrap_or(0.))) &&
+                    (!self.filter_min_zaloga || row.minimalna_zaloga.is_some_and(|dob| dob > parse_string_to_optional_f64(self.filter_min_zaloga_gt.as_str()).unwrap_or(0.))) &&
+                    (!self.filter_max_zaloga || row.maximalna_zaloga.is_some_and(|dob| dob > parse_string_to_optional_f64(self.filter_max_zaloga_gt.as_str()).unwrap_or(0.))) &&
+
                     (color_matches || !any_color_filter_active) &&
                     (!self.filter_nabavnik_ni_definiran || row.nabavna_skupina.as_ref().is_some_and(|str| str.eq(""))) &&
                     (!self.filter_nabavnik_definiran || !row.nabavna_skupina.as_ref().is_some_and(|str| str.eq(""))) &&
-                    (!self.filter_opomba || row.opomba.as_ref().is_some_and(|s| !s.eq("")))
+                    (!self.filter_opomba || row.opomba.as_ref().is_some_and(|s| !s.eq(""))) &&
+                    (!self.filter_no_dobavni_rok || row.dobavni_rok.is_none())
         })
             .cloned()
             .collect()
@@ -281,9 +305,11 @@ impl App {
                 .columns(Column::exact(90.), 1)// Odprto
                 .columns(Column::exact(90.), 1)// Dobava
                 .columns(Column::exact(110.), 1)// Zaloga SAP
-                .columns(Column::exact(120.), 1)// Zaloga skupaj
+                .columns(Column::exact(120.), 1)// Sum Zaloga
+                .columns(Column::exact(120.), 1)// Enota
                 .columns(Column::exact(120.), 1)// Minimalna zaloga
                 .columns(Column::exact(120.), 1)// Maximalna zaloga
+                .columns(Column::exact(120.), 1)// Pakiranje
                 .columns(Column::exact(120.), 1)// Blagovna Skupina
                 .columns(Column::exact(300.), 1)// Opomba
                 .columns(Column::exact(90.), 1)// Nabavnik
@@ -303,9 +329,10 @@ impl App {
                     header.col(|ui| {ui.heading("Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
 
                     header.col(|ui| {ui.heading("Sum Zaloga").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
-
+                    header.col(|ui| {ui.heading("Enota"); });
                     header.col(|ui| {ui.heading("Min Zaloga"); });
                     header.col(|ui| {ui.heading("Max Zaloga"); });
+                    header.col(|ui| {ui.heading("Pakiranje"); });
                     header.col(|ui| {ui.heading("Blagovna Skupina"); });
                     header.col(|ui| {ui.heading("Opomba"); });
                     header.col(|ui| {ui.heading("Nabavnik").on_hover_text("002 Neli\n008 Viktorija\n010 Boštjan"); });
@@ -422,6 +449,12 @@ impl App {
 
 
                         table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            let t = row.osnovna_merska_enota.clone().unwrap_or_else(|| "".to_string());
+                            ui.label(&t);
+                        });
+
+                        table_row.col(|ui| {
                             let old = row_color;
                             if row.minimalna_zaloga.is_some_and(|val| val > row.zaloga.unwrap_or(0.))  {
                                 // teal
@@ -435,7 +468,7 @@ impl App {
                             let old = row_color;
                             if row.maximalna_zaloga.is_some_and(|val| val < row.zaloga.unwrap_or(0.)) {
                                 // indigo
-                                row_color = Color32::from_rgb(92, 107, 192);
+                                row_color = Color32::from_rgb(153,51,255);
                             }
 
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
@@ -443,6 +476,12 @@ impl App {
                             row_color = old;
                         });
 
+
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            let t = row.pakiranje.clone().unwrap_or_else(|| "".to_string());
+                            ui.label(&t);
+                        });
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
@@ -518,7 +557,7 @@ fn format_number_custom(value: f64) -> String {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint();
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
 
 
         CentralPanel::default().show(ctx, |ui| {
@@ -631,28 +670,38 @@ impl eframe::App for App {
                         );
                     });
 
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.filter_min_zaloga, "Min zaloga večja kot");
+                        ui.add(
+                            TextEdit::singleline(&mut self.filter_min_zaloga_gt)
+                                .desired_width(50.)
+                        );
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.filter_max_zaloga, "Max zaloga večja kot");
+                        ui.add(
+                            TextEdit::singleline(&mut self.filter_max_zaloga_gt)
+                                .desired_width(50.)
+                        );
+                    });
+
                     ui.checkbox(&mut self.filter_opomba, "Artikel ima opombo");
+                    ui.checkbox(&mut self.filter_no_dobavni_rok, "Nima dobavnega roka");
 
 
-                    Window::new("Barve")
-                        .resizable(false)
-                        .collapsible(true)
-                        .default_open(false)
-                        .movable(false)
-                        .default_pos(pos2(ui.available_width() - 30., 315.))
-                        .order(Order::Foreground)
-                        .show(ctx, |ui| {
-                            ui.vertical(|ui| {
-                                ui.checkbox(&mut self.filter_rumena, "Rumeni");
-                                ui.checkbox(&mut self.filter_oranzna, "Oranžni");
-                                ui.checkbox(&mut self.filter_rdeca, "Rdeči");
-                                ui.checkbox(&mut self.filter_modra, "Modri");
-                                ui.checkbox(&mut self.filter_zelena, "Zeleni");
-                                ui.checkbox(&mut self.filter_viola, "Viola");
-                                ui.checkbox(&mut self.filter_teal, "Smaragdna");
-                                ui.checkbox(&mut self.filter_indigo, "Indigo");
-                            });
+                    ui.collapsing("Barve", |ui| {
+                        ui.vertical(|ui| {
+                            ui.checkbox(&mut self.filter_rumena, "Rumeni");
+                            ui.checkbox(&mut self.filter_oranzna, "Oranžni");
+                            ui.checkbox(&mut self.filter_rdeca, "Rdeči");
+                            ui.checkbox(&mut self.filter_modra, "Modri");
+                            ui.checkbox(&mut self.filter_zelena, "Zeleni");
+                            ui.checkbox(&mut self.filter_viola, "Viola");
+                            ui.checkbox(&mut self.filter_teal, "Smaragdna");
+                            ui.checkbox(&mut self.filter_indigo, "Indigo");
                         });
+                    });
 
 
 
@@ -679,7 +728,14 @@ impl eframe::App for App {
                         self.filter_dobavni_rok = true;
                         self.filter_dobavni_rok_gt = String::from("0");
 
+                        self.filter_min_zaloga = false;
+                        self.filter_min_zaloga_gt = String::from("0");
+
+                        self.filter_max_zaloga = false;
+                        self.filter_max_zaloga_gt = String::from("0");
+
                         self.filter_opomba = false;
+                        self.filter_no_dobavni_rok = false;
 
                         self.filter_rumena = false;
                         self.filter_oranzna = false;
@@ -692,8 +748,7 @@ impl eframe::App for App {
 
 
                         self.sort_state = SortState::default();
-
-
+                        self.row_data.query(&self.db_manager, &self.sort_state);
                     }
                 });
             });
@@ -866,6 +921,37 @@ impl eframe::App for App {
 
                         self.row_data.query(&self.db_manager, &self.sort_state);
                     }
+
+
+                    ui.add_space(spacing);
+
+
+
+                    ui.add(
+                        TextEdit::singleline(&mut self.pakiranje_material)
+                            .hint_text("Šifra materiala...")
+                    );
+                    ui.add(
+                        TextEdit::singleline(&mut self.pakiranje_pakiranje)
+                            .hint_text("Pakiranje...")
+                    );
+
+                    let store_pakiranje = ui.button("Shrani pakiranje");
+                    if store_pakiranje.clicked() {
+                        let resp = self.db_manager.store_pakiranje((self.pakiranje_material.parse().unwrap_or(0), self.pakiranje_pakiranje.clone()));
+                        match resp {
+                            Err(err) => {
+                                println!("error storing pakiranje: {:?}", err.to_string());
+                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju pakiranja").set_level(MessageLevel::Error).show();
+                            },
+                            Ok(_) => {
+                                println!("stored blagovna skupina!");
+                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil pakiranje").set_level(MessageLevel::Info).show();
+                            }
+                        }
+
+                        self.row_data.query(&self.db_manager, &self.sort_state);
+                    }
                 });
 
             });
@@ -895,10 +981,12 @@ impl eframe::App for App {
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::OdprtaNarocila, "Odprto");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::DobavniRok, "Dobava");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaZadostujeZaMesecev, "Zaloga SAP");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Zaloga skupaj");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Sum Zaloga");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::OsnovnaMerskaEnota, "Enota");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Dobavitelji, "Dobavitelji");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::MinimalnaZaloga, "Max zaloga");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::MaximalnaZaloga, "Min zaloga");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::MinimalnaZaloga, "Min zaloga");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::MaximalnaZaloga, "Max zaloga");
+                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Pakiranje, "Pakiranje");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::BlagovnaSkupina, "Blagovna Skupina");
                             ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Opomba, "Opomba");
                         });
@@ -1021,7 +1109,7 @@ impl eframe::App for App {
                 }
 
 
-                let delete = ui.button("Izbriši baze").on_hover_text("Izbriši pred posodabljanjem!");
+                let delete = ui.button("Izbriši ne ročno vnesene tabele").on_hover_text("Izbriši pred posodabljanjem!");
                 if delete.clicked() {
                     let res = self.db_manager.drop_all_tables();
                     match res {
@@ -1052,19 +1140,20 @@ pub fn export_filtered_to_excel(
     worksheet.write_string(0, 0, "Material")?;
     worksheet.write_string(0, 1, "Naziv")?;
     worksheet.write_string(0, 2, "Nabavnik")?;
-    //worksheet.write_string(0, 3, "MRP")?;
     worksheet.write_string(0, 3, "Zaloga")?;
     worksheet.write_string(0, 4, "Poraba, Povprečna mesečna poraba za zadnje 3 mesece")?;
-    worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnjih 12 mesecev")?;
+    worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnjih 24 mesecev")?;
     worksheet.write_string(0, 6, "Odprto, Odprta naročila dobaviteljem")?;
     worksheet.write_string(0, 7, "Dobava, Predviden dobavni rok v mesecih")?;
     worksheet.write_string(0, 8, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe")?;
-    worksheet.write_string(0, 9, "Zaloga skupaj, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe")?;
-    worksheet.write_string(0, 10, "Dobavitelji")?;
-    worksheet.write_string(0, 11, "Minimalna Zaloga")?;
-    worksheet.write_string(0, 12, "Maximalna Zaloga")?;
-    worksheet.write_string(0, 13, "Blagovna Skupina")?;
-    worksheet.write_string(0, 14, "Opomba")?;
+    worksheet.write_string(0, 9, "Sum Zaloga, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe")?;
+    worksheet.write_string(0, 10, "Enota")?;
+    worksheet.write_string(0, 11, "Dobavitelji")?;
+    worksheet.write_string(0, 12, "Minimalna Zaloga")?;
+    worksheet.write_string(0, 13, "Maximalna Zaloga")?;
+    worksheet.write_string(0, 14, "Pakiranje")?;
+    worksheet.write_string(0, 15, "Blagovna Skupina")?;
+    worksheet.write_string(0, 16, "Opomba")?;
 
 
     for (row_idx, item) in data.iter().enumerate() {
@@ -1081,13 +1170,6 @@ pub fn export_filtered_to_excel(
             Some(s) => worksheet.write_string(row, 2, s)?,
             None => worksheet.write_blank(row, 2, &Format::default())?,
         };
-        /*
-        match &item.mrp_karakteristika {
-            Some(s) => worksheet.write_string(row, 3, s)?,
-            None => worksheet.write_blank(row, 3, &Format::default())?,
-        };
-
-         */
 
         match item.zaloga {
             Some(v) => worksheet.write_number(row, 3, v)?,
@@ -1124,30 +1206,39 @@ pub fn export_filtered_to_excel(
             None => worksheet.write_blank(row, 9, &Format::default())?,
         };
 
-        match &item.dobavitelji {
+        match &item.osnovna_merska_enota {
             Some(s) => worksheet.write_string(row, 10, s)?,
             None => worksheet.write_blank(row, 10, &Format::default())?,
         };
 
-        match item.minimalna_zaloga {
-            Some(s) => worksheet.write_number(row, 11, s)?,
+        match &item.dobavitelji {
+            Some(s) => worksheet.write_string(row, 11, s)?,
             None => worksheet.write_blank(row, 11, &Format::default())?,
         };
 
-        match item.maximalna_zaloga {
+        match item.minimalna_zaloga {
             Some(s) => worksheet.write_number(row, 12, s)?,
             None => worksheet.write_blank(row, 12, &Format::default())?,
         };
 
-
-        match &item.blagovna_skupina {
-            Some(s) => worksheet.write_string(row, 13, s)?,
+        match item.maximalna_zaloga {
+            Some(s) => worksheet.write_number(row, 13, s)?,
             None => worksheet.write_blank(row, 13, &Format::default())?,
         };
 
-        match &item.opomba {
+        match &item.pakiranje {
             Some(s) => worksheet.write_string(row, 14, s)?,
             None => worksheet.write_blank(row, 14, &Format::default())?,
+        };
+
+        match &item.blagovna_skupina {
+            Some(s) => worksheet.write_string(row, 15, s)?,
+            None => worksheet.write_blank(row, 15, &Format::default())?,
+        };
+
+        match &item.opomba {
+            Some(s) => worksheet.write_string(row, 16, s)?,
+            None => worksheet.write_blank(row, 16, &Format::default())?,
         };
     }
 

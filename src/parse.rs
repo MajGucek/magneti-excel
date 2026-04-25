@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::{OsString};
 use std::path::PathBuf;
 use calamine::{open_workbook_auto, DataType, Reader};
 use chrono::{Local, Months, NaiveDate};
@@ -14,10 +15,10 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
         }
     }).cloned().take(1).collect::<PathBuf>();
     println!("Started parsing sifrant file");
-    parse_sifrant_file(sifrant_file).and_then(|rows| {
+    let _ = parse_sifrant_file(sifrant_file).and_then(|rows| {
         println!("Finished parsing sifrant file");
         db_manager.store_sifrant_to_db(rows)
-    })?;
+    });
 
     let dobavitelji_file = files.iter().filter(|file| {
         match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
@@ -26,10 +27,10 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
         }
     }).cloned().take(1).collect::<PathBuf>();
     println!("Started parsing dobavitelji file");
-    parse_dobavitelji_file(dobavitelji_file).and_then(|rows| {
+    let _ = parse_dobavitelji_file(dobavitelji_file).and_then(|rows| {
         println!("Finished parsing dobavitelji file");
         db_manager.store_dobavitelji_to_db(rows)
-    })?;
+    });
 
 
     let import_files = files.iter().filter(|file| {
@@ -39,10 +40,10 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
         }
     }).cloned().collect::<Vec<PathBuf>>();
     println!("Started parsing 3 files");
-    parse_import_files(import_files).and_then(|row_data| {
+    let _ = parse_import_files(import_files).and_then(|row_data| {
         println!("Finished parsing 3 files");
         db_manager.store_to_data(row_data)
-    })?;
+    });
 
 
     let poraba_file = files.iter().filter(|file| {
@@ -52,10 +53,10 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
         }
     }).cloned().take(1).collect::<PathBuf>();
     println!("Started parsing poraba file");
-    parse_poraba_file(poraba_file).and_then(|row_data| {
+    let _ = parse_poraba_file(poraba_file).and_then(|row_data| {
         println!("Finished parsing poraba file");
         db_manager.store_poraba_to_db(row_data)
-    })?;
+    });
     
     db_manager.try_create_view()?;
 
@@ -71,7 +72,7 @@ pub struct PorabaData {
 }
 
 pub fn parse_poraba_file(file: PathBuf) -> Result<Vec<PorabaData>, Box<dyn std::error::Error>> {
-    if !file.file_name().unwrap().eq("PORABA.XLSX") {
+    if !file.file_name().unwrap_or(OsString::default().as_os_str()).eq("PORABA.XLSX") {
         Err("Bad filename!")?;
     }
     let mut workbook = open_workbook_auto(file)?;
@@ -276,7 +277,7 @@ pub struct SifrantRow {
     pub mrp_karakteristika: String,
 }
 pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std::error::Error>> {
-    if !path.file_name().unwrap().eq("ŠIFRANT.XLSX") {
+    if !path.file_name().unwrap_or(OsString::default().as_os_str()).eq("ŠIFRANT.XLSX") {
         Err("Bad filename!")?;
     }
     let mut row_data = Vec::new();
@@ -326,7 +327,7 @@ pub struct DobaviteljRow {
     pub dobavitelj: String,
 }
 pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<dyn std::error::Error>> {
-    if !path.file_name().unwrap().eq("DOBAVITELJI.XLSX") {
+    if !path.file_name().unwrap_or(OsString::default().as_os_str()).eq("DOBAVITELJI.XLSX") {
         Err("Bad filename!")?;
     }
     let mut row_data = Vec::new();

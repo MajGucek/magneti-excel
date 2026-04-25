@@ -132,7 +132,7 @@ impl App {
 
             row_data: Rows {row_data},
             sort_state,
-            poraba_data: PorabaRows {material: 0, months: Vec::new(), poraba: Vec::new()},
+            poraba_data: PorabaRows {material: 0, naziv: String::new(),  months: Vec::new(), poraba: Vec::new()},
 
             filter_rdeca: false,
             filter_oranzna: false,
@@ -199,6 +199,7 @@ impl App {
 
 struct PorabaRows {
     material: i64,
+    naziv: String,
     months: Vec<String>,
     poraba: Vec<f64>,
 }
@@ -227,7 +228,7 @@ impl PorabaRows {
         ui.painter().text(
             pos2(title_rect.center().x, title_rect.center().y),
             Align2::CENTER_CENTER,
-            &format!("Poraba - {}", self.material),
+            &format!("Poraba - {}, {}", self.material, self.naziv),
             FontId::proportional(20.0),
             Color32::BLACK,
         );
@@ -318,7 +319,7 @@ impl PorabaRows {
         ui.interact(rect, ui.id(), Sense::click()).clicked()
     }
 
-    fn query(&mut self, material: i64, db_manager: &DBManager) -> Option<bool> {
+    fn query(&mut self, material: i64, naziv: &str, db_manager: &DBManager) -> Option<bool> {
         let raw_data: Vec<(String, f64)> = match db_manager.get_poraba(material) {
             Ok(rows) => {
                 let mut data = Vec::new();
@@ -409,6 +410,7 @@ impl PorabaRows {
 
 
         self.material = material;
+        self.naziv = naziv.to_string();
         self.months = months;
         self.poraba = poraba;
 
@@ -586,7 +588,7 @@ impl App {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
                             if ui.label(RichText::new(row.material.to_string()).underline().background_color(Color32::TRANSPARENT)).clicked() {
 
-                                self.poraba_data.query(row.material, &self.db_manager);
+                                self.poraba_data.query(row.material, row.naziv_materiala.as_ref().unwrap_or(&"".to_string()).as_str(),  &self.db_manager);
                             }
                         });
 

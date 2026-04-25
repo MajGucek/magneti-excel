@@ -57,12 +57,71 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
         println!("Finished parsing poraba file");
         db_manager.store_poraba_to_db(row_data)
     });
+
+    let prevzemi_file = files.iter().filter(|file| {
+        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+            "PREVZEMI.XLSX" => true,
+            _ => false,
+        }
+    }).cloned().take(1).collect::<PathBuf>();
+    println!("Started parsing prevzemi file");
+    let _ = parse_nabava_file(prevzemi_file).and_then(|row_data| {
+        println!("Finished parsing prevzemi file");
+        db_manager.store_nabava_to_db(row_data)
+    });
     
     db_manager.try_create_view()?;
 
 
     println!("Finished parsing ALL files"); 
     Ok(())
+}
+
+
+pub struct NabavaData {
+    pub material: i64,
+    pub nabava: f64,
+    pub date: NaiveDate,
+}
+
+pub fn parse_nabava_file(file: PathBuf) -> Result<Vec<NabavaData>, Box<dyn std::error::Error>> {
+    if !file.file_name().unwrap_or(OsString::default().as_os_str()).eq("PREVZEMI.XLSX") {
+        Err("Bad filename!")?;
+    }
+    let mut workbook = open_workbook_auto(file)?;
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let mut poraba_rows: Vec<NabavaData> = Vec::with_capacity(1000);
+    for (index, row) in range.rows().skip(1).enumerate() {
+        println!("Parsing poraba, INDEX: {}", index);
+        let material = row.get(1)
+            .and_then(DataType::get_string)
+            .map(|f| f.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0);
+        if material == 0 { continue; }
+
+
+        let date = row.get(8)
+            .and_then(DataType::get_datetime)
+            .map(|date| {
+                let  (y, m, d, _, _, _, _) = date.to_ymd_hms_milli();
+                NaiveDate::from_ymd_opt(y as i32, m as u32, d as u32).unwrap_or(NaiveDate::default())
+            })
+            .unwrap_or(NaiveDate::default());
+
+        let nabava = row.get(9)
+            .and_then(DataType::get_float)
+            .map(|f| f.abs())
+            .unwrap_or(0.);
+
+        poraba_rows.push(NabavaData {
+            material,
+            nabava,
+            date,
+        })
+    }
+
+
+    Ok(poraba_rows)
 }
 
 pub struct PorabaData {

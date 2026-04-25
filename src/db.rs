@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
 use sqlite::{Connection, State};
-use crate::parse::{DobaviteljRow, PorabaData, RowData, SifrantRow};
+use crate::parse::{DobaviteljRow, NabavaData, PorabaData, RowData, SifrantRow};
 
 pub struct DBManager {
     pub db_name: String
@@ -18,6 +18,7 @@ impl DBManager {
         self.create_blagovna_skupina_table(&connection)?;
         self.create_pakiranje_table(&connection)?;
         self.create_poraba_table(&connection)?;
+        self.create_nabava_table(&connection)?;
 
         Ok(())
     }
@@ -33,6 +34,10 @@ impl DBManager {
         PorabaQuery::query(material, &connection)
     }
 
+    pub fn get_nabava(&self, material: i64) -> Result<Vec<NabavaQuery>, Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        NabavaQuery::query(material, &connection)
+    }
 
     fn create_data_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         connection.execute("BEGIN TRANSACTION")?;
@@ -160,6 +165,44 @@ impl DBManager {
         }
         connection.execute("COMMIT")?;
         println!("Stored to table Porabe");
+        //self.try_create_view()?;
+        Ok(())
+    }
+
+    fn create_nabava_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS nabave (
+                id INTEGER PRIMARY KEY,
+                material INTEGER NOT NULL,
+                nabava REAL,
+                date DATE
+            );
+        ")?;
+        connection.execute("COMMIT")?;
+        println!("Created nabave table");
+        Ok(())
+    }
+
+    pub fn store_nabava_to_db(&self, rows: Vec<NabavaData>) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_nabava_table(&connection)?;
+
+        let mut statement = connection.prepare("
+            INSERT INTO nabave (material, nabava, date) VALUES (?, ?, ?)
+        ")?;
+
+        connection.execute("BEGIN TRANSACTION")?;
+        for (ind, nabava_row) in rows.iter().enumerate() {
+            println!("nabave: INSERTING: {}", ind);
+            statement.bind((1, nabava_row.material))?;
+            statement.bind((2, nabava_row.nabava))?;
+            statement.bind(&[(3, convert_to_sql(nabava_row.date).as_str())][..])?;
+            statement.next()?;
+            statement.reset()?;
+        }
+        connection.execute("COMMIT")?;
+        println!("Stored to table Nabave");
         //self.try_create_view()?;
         Ok(())
     }
@@ -526,6 +569,40 @@ impl PorabaQuery {
         while let State::Row = statement.next()? {
             let mut row = PorabaQuery::default();
             row.poraba = statement.read::<f64, _>(0)?;
+            row.month = statement.read::<String, _>(1)?;
+            rows.push(row);
+        }
+
+        Ok(rows)
+    }
+}
+
+
+#[derive(Default, Clone, Debug)]
+pub struct NabavaQuery {
+    pub nabava: f64,
+    pub month: String
+}
+
+impl NabavaQuery {
+    fn query(material: i64, connection: &Connection) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
+        let mut rows: Vec<NabavaQuery> = Vec::with_capacity(2500);
+
+        let sql = "
+            SELECT
+                SUM(nabava) as total,
+                COALESCE(strftime('%Y-%m', date), '') as month
+            FROM nabave
+            WHERE material = ?
+            GROUP BY month
+            ORDER BY month;
+        ".to_string();
+        let mut statement = connection.prepare(sql)?;
+        statement.bind((1, material))?;
+
+        while let State::Row = statement.next()? {
+            let mut row = NabavaQuery::default();
+            row.nabava = statement.read::<f64, _>(0)?;
             row.month = statement.read::<String, _>(1)?;
             rows.push(row);
         }

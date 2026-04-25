@@ -3,12 +3,13 @@
 
 mod parse;
 mod db;
+
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use chrono::{Datelike, Utc};
 use eframe::{NativeOptions};
 use eframe::egui::*;
 use eframe::egui::Ui;
-use eframe::epaint::RectShape;
 use egui_extras::{Column, TableBuilder};
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use rust_xlsxwriter::{Format, Workbook};
@@ -33,7 +34,7 @@ struct App {
     row_data: Rows,
     sort_state: SortState,
 
-    poraba_data: PorabaRows,
+    poraba_nabava_data: PorabaNabavaRows,
 
     /* --Filters-- */
     filter_rdeca: bool,
@@ -132,7 +133,7 @@ impl App {
 
             row_data: Rows {row_data},
             sort_state,
-            poraba_data: PorabaRows {material: 0, naziv: String::new(),  months: Vec::new(), poraba: Vec::new()},
+            poraba_nabava_data: PorabaNabavaRows {material: 0, naziv: String::new(),  months: Vec::new(), poraba_nabava: Vec::new()},
 
             filter_rdeca: false,
             filter_oranzna: false,
@@ -197,13 +198,19 @@ impl App {
 }
 
 
-struct PorabaRows {
+struct PorabaNabavaRows {
     material: i64,
     naziv: String,
     months: Vec<String>,
-    poraba: Vec<f64>,
+    poraba_nabava: Vec<(f64, f64)>,
 }
-impl PorabaRows {
+impl PorabaNabavaRows {
+    fn clear(&mut self) {
+        self.material = 0;
+        self.naziv = String::new();
+        self.months = Vec::new();
+        self.poraba_nabava = Vec::new();
+    }
     fn render(&self, ui: &mut Ui) -> bool {
         if self.months.is_empty() {
             return false;
@@ -212,7 +219,7 @@ impl PorabaRows {
         ui.set_min_size(vec2(1500.0, 800.0));
 
         let title_rect = {
-            let title_height = 50.0;
+            let title_height = 100.0;
             Rect::from_min_max(
                 pos2(ui.min_rect().left(), ui.min_rect().top()),
                 pos2(ui.min_rect().right(), ui.min_rect().top() + title_height),
@@ -226,25 +233,44 @@ impl PorabaRows {
         );
 
         ui.painter().text(
-            pos2(title_rect.center().x, title_rect.center().y),
+            pos2(title_rect.center().x, title_rect.center().y - 30.),
             Align2::CENTER_CENTER,
             &format!("Poraba - {}, {}", self.material, self.naziv),
             FontId::proportional(20.0),
             Color32::BLACK,
         );
 
+        ui.painter().text(
+            pos2(title_rect.center().x - 50., title_rect.center().y - 0.),
+            Align2::CENTER_CENTER,
+            "Poraba",
+            FontId::proportional(20.0),
+            Color32::GREEN,
+        );
+
+        ui.painter().text(
+            pos2(title_rect.center().x + 50., title_rect.center().y - 0.),
+            Align2::CENTER_CENTER,
+            "Nabava",
+            FontId::proportional(20.0),
+            Color32::LIGHT_RED,
+        );
+
+
         let rect = ui.max_rect();  // Chart area (below title)
         let padding = vec2(60.0, 40.0);
 
         let plot_rect = Rect::from_min_max(
-            pos2(rect.left(), rect.top() + 50.),  // Skip title space
+            pos2(rect.left(), rect.top() + 80.),  // Skip title space
             pos2(rect.right(), rect.bottom()),
         );
 
         let slot_width = (plot_rect.width() - padding.x * 2.0) / self.months.len() as f32;
         let bar_width = slot_width * 0.7;
 
-        let max_value = self.poraba.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)).max(1.0);
+        let max_value = self.poraba_nabava.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(
+            if b.0 > b.1 {b.0} else {b.1}
+        )).max(1.0);
 
         // Background
         ui.painter().rect_filled(plot_rect, Rounding::same(0), Color32::from_gray(240));
@@ -285,27 +311,51 @@ impl PorabaRows {
             );
         }
 
-        for (i, (&value, month)) in self.poraba.iter().zip(&self.months).enumerate() {
-
-
+        for (i, ((poraba, nabava), month)) in self.poraba_nabava.iter().zip(&self.months).enumerate() {
             let x = plot_rect.left() + padding.x + (i as f32) * slot_width + (slot_width - bar_width) / 2.0;
-            let bar_height = (value / max_value * (plot_rect.height() - padding.y * 2.0) as f64) as f32;
 
-            let bar_rect = Rect::from_min_max(
-                pos2(x, plot_rect.bottom() - padding.y - bar_height),
+
+            let poraba_bar_height = (poraba / max_value * (plot_rect.height() - padding.y * 2.0) as f64) as f32;
+            let poraba_bar_rect = Rect::from_min_max(
+                pos2(x, plot_rect.bottom() - padding.y - poraba_bar_height),
                 pos2(x + bar_width, plot_rect.bottom() - padding.y),
             );
 
-            ui.painter().add(RectShape {
-                rect: bar_rect,
-                corner_radius: Default::default(),
-                fill: Color32::GREEN,
-                stroke: Stroke::new(1.0, Color32::DARK_GREEN),
-                stroke_kind: StrokeKind::Inside,
-                round_to_pixels: None,
-                blur_width: 0.0,
-                brush: None,
-            });
+            let nabava_bar_height = (nabava / max_value * (plot_rect.height() - padding.y * 2.0) as f64) as f32;
+            let nabava_bar_rect = Rect::from_min_max(
+                pos2(x, plot_rect.bottom() - padding.y - nabava_bar_height),
+                pos2(x + bar_width, plot_rect.bottom() - padding.y),
+            );
+
+            let green = Color32::from_rgba_unmultiplied(0, 255, 0, 120);
+            let dark_green = Color32::from_rgba_unmultiplied(0, 100, 0, 180);
+
+            let red = Color32::from_rgba_unmultiplied(255, 0, 0, 120);
+            let light_red = Color32::from_rgba_unmultiplied(255, 100, 100, 120);
+
+            let (first, second) = if poraba_bar_height > nabava_bar_height {
+                (
+                    (poraba_bar_rect, green, dark_green),
+                    (nabava_bar_rect, light_red, red),
+                )
+            } else {
+                (
+                    (nabava_bar_rect, light_red, red),
+                    (poraba_bar_rect, green, dark_green),
+                )
+            };
+
+            for (rect, fill, stroke_color) in [first, second] {
+                ui.painter().rect(
+                    rect,
+                    0.0,
+                    fill,
+                    Stroke::new(1.0, stroke_color),
+                    StrokeKind::Inside,
+                );
+            }
+
+
 
             ui.painter().text(
                 pos2(x + bar_width / 2.0, plot_rect.bottom() - 20.0),
@@ -319,8 +369,8 @@ impl PorabaRows {
         ui.interact(rect, ui.id(), Sense::click()).clicked()
     }
 
-    fn query(&mut self, material: i64, naziv: &str, db_manager: &DBManager) -> Option<bool> {
-        let raw_data: Vec<(String, f64)> = match db_manager.get_poraba(material) {
+    fn query(&mut self, material: i64, naziv: &str, db_manager: &DBManager) {
+        let raw_poraba_data: Vec<(String, f64)> = match db_manager.get_poraba(material) {
             Ok(rows) => {
                 let mut data = Vec::new();
                 for row in rows {
@@ -330,26 +380,54 @@ impl PorabaRows {
             }
             Err(err) => {
                 println!("DB error: {:?}", err);
-                return Some(false);
+                Vec::new()
             }
         };
 
-        if raw_data.is_empty() {
-            self.months.clear();
-            self.poraba.clear();
-            return Some(true);
+        let raw_nabava_data: Vec<(String, f64)> = match db_manager.get_nabava(material) {
+            Ok(rows) => {
+                let mut data = Vec::new();
+                for row in rows {
+                    data.push((row.month.clone(), row.nabava));
+                }
+                data
+            }
+            Err(err) => {
+                println!("DB error: {:?}", err);
+                Vec::new()
+            }
+        };
+
+        let mut map: HashMap<String, (f64, f64)> = HashMap::new();
+        for (month, poraba) in raw_poraba_data {
+            map.insert(month, (poraba, 0.));
         }
 
-        let month_data: Vec<((i32, u32), String, f64)> = raw_data
+
+
+        for (month, nabava) in raw_nabava_data {
+            map.entry(month)
+                .and_modify(|e| e.1 = nabava)
+                .or_insert((0., nabava));
+        }
+        let raw_data: Vec<(String, f64, f64)> = map.into_iter().map(|(m, (p, n))| (m, p, n))
+            .collect();
+
+
+        if raw_data.is_empty() {
+            self.clear();
+        }
+
+        let month_data: Vec<((i32, u32), String, (f64, f64))> = raw_data
             .iter()
-            .filter_map(|(month_str, value)| {
+            .filter_map(|(month_str, poraba, nabava)| {
                 let parts: Vec<&str> = month_str.split('-').collect();
                 if parts.len() == 2 {
                     if let (Ok(year), Ok(month)) = (
                         parts[0].parse::<i32>(),
                         parts[1].parse::<u32>()
                     ) {
-                        Some(((year, month), month_str.clone(), *value))
+                        Some(((year, month), month_str.clone(), (*poraba, *nabava)))
                     } else {
                         None
                     }
@@ -359,15 +437,18 @@ impl PorabaRows {
             })
             .collect();
 
+        let mut month_data = month_data;
+        month_data.sort_by_key(|(m, _, _)| *m);
+
         let today_year = Utc::now().year();
         let today_month = Utc::now().month();
 
         let mut months = Vec::new();
-        let mut poraba = Vec::new();
+        let mut poraba_nabava = Vec::new();
 
         let first = month_data[0].clone();
         months.push(first.1.clone());
-        poraba.push(first.2);
+        poraba_nabava.push(first.2);
         let mut prev_year = first.0 .0;
         let mut prev_month = first.0 .1;
 
@@ -381,7 +462,7 @@ impl PorabaRows {
 
             while current_year < *year || (current_year == *year && current_month < *month) {
                 months.push(format!("{:04}-{:02}", current_year, current_month));
-                poraba.push(0.0);
+                poraba_nabava.push((0.0, 0.0));
                 current_month += 1;
                 if current_month > 12 {
                     current_month = 1;
@@ -390,7 +471,7 @@ impl PorabaRows {
             }
 
             months.push(month_str.clone());
-            poraba.push(*value);
+            poraba_nabava.push(*value);
             prev_year = *year;
             prev_month = *month;
         }
@@ -400,7 +481,7 @@ impl PorabaRows {
         let mut current_year = prev_year;
         while current_year < today_year || (current_year == today_year && current_month <= today_month) {
             months.push(format!("{:04}-{:02}", current_year, current_month));
-            poraba.push(0.0);
+            poraba_nabava.push((0.0, 0.0));
             current_month += 1;
             if current_month > 12 {
                 current_month = 1;
@@ -412,9 +493,8 @@ impl PorabaRows {
         self.material = material;
         self.naziv = naziv.to_string();
         self.months = months;
-        self.poraba = poraba;
+        self.poraba_nabava = poraba_nabava;
 
-        Some(true)
     }
 }
 
@@ -590,7 +670,7 @@ impl App {
                                 .on_hover_cursor(CursorIcon::PointingHand)
                                 .clicked() {
 
-                                self.poraba_data.query(row.material, row.naziv_materiala.as_ref().unwrap_or(&"".to_string()).as_str(),  &self.db_manager);
+                                self.poraba_nabava_data.query(row.material, row.naziv_materiala.as_ref().unwrap_or(&"".to_string()).as_str(),  &self.db_manager);
                             }
                         });
 
@@ -1308,10 +1388,9 @@ impl eframe::App for App {
         Area::new(Id::from("chart"))
             .anchor(Align2::RIGHT_BOTTOM, [-25., -25.])
             .show(ctx, |ui| {
-                chart_clicked = self.poraba_data.render(ui);
+                chart_clicked = self.poraba_nabava_data.render(ui);
                 if ui.input(|i| i.pointer.any_pressed()) && !chart_clicked {
-                    self.poraba_data.months.clear();
-                    self.poraba_data.poraba.clear();
+                    self.poraba_nabava_data.clear();
                 }
             });
 

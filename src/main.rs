@@ -586,7 +586,9 @@ impl App {
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            if ui.label(RichText::new(row.material.to_string()).underline().background_color(Color32::TRANSPARENT)).clicked() {
+                            if ui.label(RichText::new(row.material.to_string()).underline().background_color(Color32::TRANSPARENT))
+                                .on_hover_cursor(CursorIcon::PointingHand)
+                                .clicked() {
 
                                 self.poraba_data.query(row.material, row.naziv_materiala.as_ref().unwrap_or(&"".to_string()).as_str(),  &self.db_manager);
                             }
@@ -664,7 +666,7 @@ impl App {
 
                             } else {
                                 let label_text = row.dobavni_rok.map_or(" ".repeat(18), |v| format_number_custom(v, 1));
-                                let resp = ui.label(label_text);
+                                let resp = ui.label(label_text).on_hover_cursor(CursorIcon::Help);
                                 if resp.double_clicked() {
                                     self.editing_dobavni_rok_row = Some(index);
                                     self.edit_dobavni_rok_input = row.dobavni_rok.map_or("".to_string(), |v| format!("{}", v));
@@ -724,7 +726,7 @@ impl App {
 
                             } else {
                                 let label_text = row.minimalna_zaloga.map_or(" ".repeat(28), |v| format_number_custom(v, 0));
-                                let resp = ui.label(label_text);
+                                let resp = ui.label(label_text).on_hover_cursor(CursorIcon::Help);
                                 if resp.double_clicked() {
                                     self.editing_min_zaloga_row = Some(index);
                                     self.edit_min_zaloga_row_input = row.minimalna_zaloga.map_or("".to_string(), |v| format_number_custom(v, 0));
@@ -769,7 +771,7 @@ impl App {
 
                             } else {
                                 let label_text = row.maximalna_zaloga.map_or(" ".repeat(28), |v| format_number_custom(v, 0));
-                                let resp = ui.label(label_text);
+                                let resp = ui.label(label_text).on_hover_cursor(CursorIcon::Help);
                                 if resp.double_clicked() {
                                     self.editing_max_zaloga_row = Some(index);
                                     self.edit_max_zaloga_row_input = row.maximalna_zaloga.map_or("".to_string(), |v| format_number_custom(v, 0));
@@ -813,7 +815,7 @@ impl App {
                                 if label_text.is_empty() {
                                     label_text = " ".repeat(20);
                                 }
-                                let resp = ui.label(label_text.clone());
+                                let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
                                 if resp.double_clicked() {
                                     self.editing_pakiranje_row = Some(index);
                                     self.edit_pakiranje_input = String::new();
@@ -853,7 +855,7 @@ impl App {
                                 if label_text.is_empty() {
                                     label_text = " ".repeat(73);
                                 }
-                                let resp = ui.label(label_text.clone());
+                                let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
                                 if resp.double_clicked() {
                                     self.editing_blagovna_skupina_row = Some(index);
                                     self.edit_blagovna_skupina_input = String::new();
@@ -894,7 +896,7 @@ impl App {
                                 if label_text.is_empty() {
                                     label_text = " ".repeat(73);
                                 }
-                                let resp = ui.label(label_text.clone());
+                                let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
                                 if resp.double_clicked() {
                                     self.editing_opomba_row = Some(index);
                                     self.edit_opomba_input = String::new();

@@ -2,7 +2,45 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use calamine::{open_workbook_auto, DataType, Reader};
 use chrono::{Local, Months, NaiveDate};
-use rfd::{MessageDialog, MessageLevel};
+use crate::db::DBManager;
+
+pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<(), Box<dyn std::error::Error>> {
+    let sifrant_file = files.iter().filter(|file| {
+        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+            "ŠIFRANT.XLSX" => true,
+            _ => false,
+        }
+    }).cloned().take(1).collect::<PathBuf>();
+    parse_sifrant_file(sifrant_file).and_then(|rows| {
+        db_manager.store_sifrant_to_db(rows)
+    })?;
+
+    let dobavitelji_file = files.iter().filter(|file| {
+        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+            "DOBAVITELJI.XLSX" => true,
+            _ => false,
+        }
+    }).cloned().take(1).collect::<PathBuf>();
+    parse_dobavitelji_file(dobavitelji_file).and_then(|rows| {
+        db_manager.store_dobavitelji_to_db(rows)
+    })?;
+
+
+    let import_files = files.iter().filter(|file| {
+        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+            "PORABA.XLSX" | "ODPRTA NAROČILA.XLSX" | "ZALOGA.XLSX" => true,
+            _ => false,
+        }
+    }).cloned().collect::<Vec<PathBuf>>();
+    parse_import_files(import_files).and_then(|row_data| {
+        db_manager.store_to_data(row_data)
+    })?;
+
+
+
+
+    Ok(())
+}
 
 
 #[derive(Default, Debug)]
@@ -14,13 +52,6 @@ pub struct RowData {
     pub odprta_narocila: f64,
 }
 pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
-    if files.len() != 3 {
-        MessageDialog::new()
-            .set_title("Napaka, nepravilno število datotek != 4")
-            .set_level(MessageLevel::Error)
-            .show();
-    }
-
     let poraba_file = files.iter().find(|&path_buf| {
         path_buf.file_name().unwrap() == "PORABA.XLSX"
     }).ok_or("File PORABA.XLSX not found")?;

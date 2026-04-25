@@ -2,45 +2,32 @@
 
 mod parse;
 mod db;
-
+use std::time::{Duration, Instant};
 use eframe::{NativeOptions};
 use eframe::egui::*;
 use egui_extras::{Column, TableBuilder};
-use rfd::MessageLevel;
+use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use rust_xlsxwriter::{Format, Workbook};
 use crate::db::{DBManager, SortColumn, SortState, ViewQuery};
-use crate::parse::{parse_dobavitelji_file, parse_import_files, parse_sifrant_file};
+use crate::parse::{parse_all_files};
+
+
+static YELLOW: Color32 = Color32::YELLOW;
+static ORANGE: Color32 = Color32::from_rgb(255, 153, 51);
+static RED: Color32 = Color32::from_rgb(255, 135, 135);
+static GREEN: Color32 = Color32::LIGHT_GREEN;
+static BLUE: Color32 = Color32::LIGHT_BLUE;
+static VIOLET: Color32 = Color32::from_rgb(191, 136, 187);
+static TEAL: Color32 = Color32::from_rgb(0, 150, 136);
+static INDIGO: Color32 = Color32::from_rgb(180, 100, 255);
+
 
 struct App {
     db_manager: DBManager,
+    last_query: Instant,
 
     row_data: Rows,
-    successfully_loaded_query: Option<bool>,
     sort_state: SortState,
-
-
-    opomba_material: String,
-    opomba_opomba: String,
-
-    dobavni_rok_material: String,
-    dobavni_rok_dobavni_rok: String,
-
-    min_zaloga_material: String,
-    min_zaloga_min_zaloga: String,
-
-    max_zaloga_material: String,
-    max_zaloga_max_zaloga: String,
-
-    blagovna_skupina_material: String,
-    blagovna_skupina_blagovna_skupina: String,
-
-    pakiranje_material: String,
-    pakiranje_pakiranje: String,
-
-
-    /* --Columns-- */
-
-
 
     /* --Filters-- */
     filter_rdeca: bool,
@@ -83,6 +70,23 @@ struct App {
     filter_no_dobavni_rok: bool,
 
 
+    editing_dobavni_rok_row: Option<usize>,
+    edit_dobavni_rok_input: String,
+
+    editing_opomba_row: Option<usize>,
+    edit_opomba_input: String,
+
+    editing_min_zaloga_row: Option<usize>,
+    edit_min_zaloga_row_input: String,
+
+    editing_max_zaloga_row: Option<usize>,
+    edit_max_zaloga_row_input: String,
+
+    editing_blagovna_skupina_row: Option<usize>,
+    edit_blagovna_skupina_input: String,
+
+    editing_pakiranje_row: Option<usize>,
+    edit_pakiranje_input: String,
 }
 
 impl App {
@@ -104,7 +108,7 @@ impl App {
 
         let result = db_manager.get_data(&sort_state);
 
-        let successfully_loaded_query = match result {
+        match result {
             Err(err) => {
                 println!("initial_load error: {:?}", err.to_string());
                 Some(false)
@@ -118,29 +122,10 @@ impl App {
 
         Self {
             db_manager,
+            last_query: Instant::now(),
+
             row_data: Rows {row_data},
-            successfully_loaded_query,
             sort_state,
-
-
-            opomba_material: String::new(),
-            opomba_opomba: String::new(),
-
-            dobavni_rok_material: String::new(),
-            dobavni_rok_dobavni_rok: String::new(),
-
-            min_zaloga_material: String::new(),
-            min_zaloga_min_zaloga: String::new(),
-
-            max_zaloga_material: String::new(),
-            max_zaloga_max_zaloga: String::new(),
-
-            blagovna_skupina_material: String::new(),
-            blagovna_skupina_blagovna_skupina: String::new(),
-
-            pakiranje_material: String::new(),
-            pakiranje_pakiranje: String::new(),
-
 
             filter_rdeca: false,
             filter_oranzna: false,
@@ -181,6 +166,24 @@ impl App {
 
             filter_opomba: false,
             filter_no_dobavni_rok: false,
+
+            editing_dobavni_rok_row: None,
+            edit_dobavni_rok_input: String::new(),
+
+            editing_opomba_row: None,
+            edit_opomba_input: String::new(),
+
+            editing_min_zaloga_row: None,
+            edit_min_zaloga_row_input: String::new(),
+
+            editing_max_zaloga_row: None,
+            edit_max_zaloga_row_input: String::new(),
+
+            editing_blagovna_skupina_row: None,
+            edit_blagovna_skupina_input: String::new(),
+
+            editing_pakiranje_row: None,
+            edit_pakiranje_input: String::new(),
         }
     }
 
@@ -229,10 +232,11 @@ impl App {
                 if any_color_filter_active {
                     let months_left = row.dobavni_rok.map_or(0., |dr| row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - dr);
                     let no_open_orders = row.odprta_narocila.is_some_and(|v| v == 0.);
+                    let no_3m_no_24m = !(row.poraba_3m.is_some_and(|v| v == 0.) && row.poraba_24m.is_some_and(|v| v == 0.));
 
-                    color_matches |= self.filter_rumena && row.dobavni_rok.is_some() && months_left >= 1.0 && months_left < 1.5 && no_open_orders;
-                    color_matches |= self.filter_oranzna && row.dobavni_rok.is_some() && months_left >= 0.3 && months_left < 1.0 && no_open_orders;
-                    color_matches |= self.filter_rdeca && row.dobavni_rok.is_some() && months_left < 0.3 && no_open_orders && row.dobavni_rok.unwrap_or(0.) < 90.;
+                    color_matches |= self.filter_rumena && row.dobavni_rok.is_some() && months_left >= 1.0 && months_left < 1.5 && no_open_orders && no_3m_no_24m;
+                    color_matches |= self.filter_oranzna && row.dobavni_rok.is_some() && months_left >= 0.3 && months_left < 1.0 && no_open_orders && no_3m_no_24m;
+                    color_matches |= self.filter_rdeca && row.dobavni_rok.is_some() && months_left < 0.3 && no_open_orders && row.dobavni_rok.unwrap_or(0.) < 90. && no_3m_no_24m;
 
                     color_matches |= self.filter_viola && row.dobavni_rok.is_some() && row.dobavni_rok.unwrap_or(0.) >= 90. &&
                         no_open_orders;
@@ -291,17 +295,17 @@ impl App {
     }
 
 
-    pub fn render_table(&self, ui: &mut Ui, data: &Vec<ViewQuery>) {
+    pub fn render_table(&mut self, ui: &mut Ui, data: &Vec<ViewQuery>) {
         ScrollArea::both().show(ui, |ui| {
             ui.style_mut().visuals.faint_bg_color = Color32::from_rgb(200, 200, 200);
             TableBuilder::new(ui)
                 .striped(true)
                 .cell_layout(Layout::left_to_right(Align::Center))
-                .columns(Column::exact(80.), 1) // Material
+                .columns(Column::exact(100.), 1) // Material
                 .columns(Column::exact(300.), 1)// Naziv
                 .columns(Column::exact(85.), 1) // Zaloga
-                .columns(Column::exact(100.5), 1)// Poraba 3M
-                .columns(Column::exact(100.5), 1)// Poraba 24M
+                .columns(Column::exact(120.5), 1)// Poraba 3M
+                .columns(Column::exact(120.5), 1)// Poraba 24M
                 .columns(Column::exact(90.), 1)// Odprto
                 .columns(Column::exact(90.), 1)// Dobava
                 .columns(Column::exact(110.), 1)// Zaloga SAP
@@ -310,33 +314,33 @@ impl App {
                 .columns(Column::exact(120.), 1)// Minimalna zaloga
                 .columns(Column::exact(120.), 1)// Maximalna zaloga
                 .columns(Column::exact(120.), 1)// Pakiranje
-                .columns(Column::exact(120.), 1)// Blagovna Skupina
+                .columns(Column::exact(160.), 1)// Blagovna Skupina
                 .columns(Column::exact(300.), 1)// Opomba
-                .columns(Column::exact(90.), 1)// Nabavnik
+                .columns(Column::exact(110.), 1)// Nabavnik
                 .columns(Column::remainder(), 1)//Dobavitelji
 
                 .header(50.0, |mut header| {
-                    header.col(|ui| {ui.heading("Material"); });
-                    header.col(|ui| {ui.heading("Naziv"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Material, "Material"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::NazivMateriala, "Naziv"); });
 
 
-                    header.col(|ui| {ui.heading("Zaloga").on_hover_text("Trenutna zaloga v SAP-u"); });
-                    header.col(|ui| {ui.heading("Poraba 3M").on_hover_text("Povprečna mesečna poraba za zadnje 3 mesece"); });
-                    header.col(|ui| {ui.heading("Poraba 24M").on_hover_text("Povprečna mesečna poraba za zadnjih 12 mesecev"); });
-                    header.col(|ui| {ui.heading("Odprto").on_hover_text("Odprta naročila dobaviteljem"); });
-                    header.col(|ui| {ui.heading("Dobava").on_hover_text("Predviden dobavni rok v mesecih"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Zaloga, "Zaloga").on_hover_text("Trenutna zaloga v SAP-u"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Poraba3M, "Poraba 3M").on_hover_text("Povprečna mesečna poraba za zadnje 3 mesece"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Poraba24M, "Poraba 24M").on_hover_text("Povprečna mesečna poraba za zadnjih 12 mesecev"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::OdprtaNarocila, "Odprto").on_hover_text("Odprta naročila dobaviteljem"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::DobavniRok, "Dobava").on_hover_text("Predviden dobavni rok v mesecih"); });
 
-                    header.col(|ui| {ui.heading("Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaZadostujeZaMesecev, "Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
 
-                    header.col(|ui| {ui.heading("Sum Zaloga").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
-                    header.col(|ui| {ui.heading("Enota"); });
-                    header.col(|ui| {ui.heading("Min Zaloga"); });
-                    header.col(|ui| {ui.heading("Max Zaloga"); });
-                    header.col(|ui| {ui.heading("Pakiranje"); });
-                    header.col(|ui| {ui.heading("Blagovna Skupina"); });
-                    header.col(|ui| {ui.heading("Opomba"); });
-                    header.col(|ui| {ui.heading("Nabavnik").on_hover_text("002 Neli\n008 Viktorija\n010 Boštjan"); });
-                    header.col(|ui| {ui.heading("Dobavitelji"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Sum Zaloga").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::OsnovnaMerskaEnota, "Enota"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::MinimalnaZaloga, "Min zaloga"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::MaximalnaZaloga, "Max zaloga"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Pakiranje, "Pakiranje"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::BlagovnaSkupina, "Blagovna Skupina"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Opomba, "Opomba"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::NabavnaSkupina, "Nabavnik").on_hover_text("002 Neli\n008 Viktorija\n010 Boštjan"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Dobavitelji, "Dobavitelji"); });
                     //header.col(|ui| {ui.heading("MRP"); });
                 })
                 .body(|body| {
@@ -344,43 +348,8 @@ impl App {
                         let index = table_row.index().clone();
 
                         let row = &data[index];
-
-                        let mut row_color = Color32::TRANSPARENT;
-                        if row.dobavni_rok.is_some() {
-                            if row.odprta_narocila.is_some_and(|v| v != 0.) {
-                                if row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.) <= row.dobavni_rok.unwrap_or(0.) {
-                                    row_color = Color32::LIGHT_BLUE;
-                                } else {
-                                    row_color = Color32::LIGHT_GREEN;
-                                }
-                            }
-
-                            if row.odprta_narocila.is_some_and(|v| v == 0.) {
-                                if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 {
-                                    // yellow
-                                    row_color = Color32::YELLOW;
-                                }
-
-                                if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.0 {
-                                    // orange
-                                    row_color = Color32::from_rgb(255, 153, 51);
-                                }
-
-                                if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.3 {
-                                    // red
-                                    row_color = Color32::from_rgb(255, 135, 135);
-                                }
-
-                                if row.dobavni_rok.unwrap_or(0.) >= 90. {
-                                    // VIOLET
-                                    row_color = Color32::from_rgb(191, 136, 187);
-                                }
-                            }
-                        }
-
-
-
-
+                        let colors = calculate_colors(row);
+                        let mut row_color = colors.last().cloned().unwrap_or(Color32::TRANSPARENT);
 
 
                         table_row.col(|ui| {
@@ -399,13 +368,13 @@ impl App {
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.zaloga.map_or("".to_string(), |v| format_number_custom(v)));
+                            ui.label(row.zaloga.map_or("".to_string(), |v| format_number_custom(v, 1)));
                         });
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            let poraba_3m = row.poraba_3m.map_or("".to_string(), |v| format_number_custom(v));
-                            let poraba_24m = row.poraba_24m.map_or("".to_string(), |v| format_number_custom(v));
+                            let poraba_3m = row.poraba_3m.map_or("".to_string(), |v| format_number_custom(v, 1));
+                            let poraba_24m = row.poraba_24m.map_or("".to_string(), |v| format_number_custom(v, 1));
 
                             let (arrow, color) = if poraba_3m > poraba_24m {
                                 ("🔺", Color32::BLACK)
@@ -424,27 +393,60 @@ impl App {
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.poraba_24m.map_or("".to_string(), |v| format_number_custom(v)));
+                            ui.label(row.poraba_24m.map_or("".to_string(), |v| format_number_custom(v, 1)));
                         });
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.odprta_narocila.map_or("".to_string(), |v| format_number_custom(v)));
+                            ui.label(row.odprta_narocila.map_or("".to_string(), |v| format_number_custom(v, 0)));
                         });
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.dobavni_rok.map_or("".to_string(), |v| format_number_custom(v)));
+
+                            if self.editing_dobavni_rok_row == Some(index) {
+                                let response = ui.text_edit_singleline(&mut self.edit_dobavni_rok_input);
+                                if response.lost_focus() {
+                                    self.editing_dobavni_rok_row = None;
+
+                                    let os_resp = MessageDialog::new()
+                                        .set_title("Potrdi vnos")
+                                        .set_level(MessageLevel::Info)
+                                        .set_buttons(MessageButtons::OkCancel)
+                                        .show();
+
+                                    match os_resp {
+                                        MessageDialogResult::Ok => {
+                                            let _ = self.db_manager.store_dobavni_rok((
+                                                row.material,
+                                                parse_string_to_optional_f64(self.edit_dobavni_rok_input.as_str()),
+                                            ));
+                                            self.row_data.query(&self.db_manager, &self.sort_state);
+                                        },
+                                        _ => {}
+                                    }
+                                }
+
+                            } else {
+                                let label_text = row.dobavni_rok.map_or(" ".repeat(18), |v| format_number_custom(v, 1));
+                                let resp = ui.label(label_text);
+                                if resp.double_clicked() {
+                                    self.editing_dobavni_rok_row = Some(index);
+                                    self.edit_dobavni_rok_input = row.dobavni_rok.map_or("".to_string(), |v| format!("{}", v));
+                                }
+
+                            }
+
                         });
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.trenutna_zaloga_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v)));
+                            ui.label(row.trenutna_zaloga_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v, 1)));
                         });
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v)));
+                            ui.label(row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v, 1)));
                         });
 
 
@@ -456,44 +458,214 @@ impl App {
 
                         table_row.col(|ui| {
                             let old = row_color;
-                            if row.minimalna_zaloga.is_some_and(|val| val > row.zaloga.unwrap_or(0.))  {
+                            if row.minimalna_zaloga.is_some_and(|val| val > (row.zaloga.unwrap_or(0.) + row.odprta_narocila.unwrap_or(0.)))  {
                                 // teal
-                                row_color = Color32::from_rgb(0, 150, 136);
+                                row_color = TEAL;
                             }
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.minimalna_zaloga.map_or("".to_string(), |v| format_number_custom(v)));
+
+                            if self.editing_min_zaloga_row == Some(index) {
+                                let response = ui.text_edit_singleline(&mut self.edit_min_zaloga_row_input);
+                                if response.lost_focus() {
+                                    self.editing_min_zaloga_row = None;
+
+                                    let os_resp = MessageDialog::new()
+                                        .set_title("Potrdi vnos")
+                                        .set_level(MessageLevel::Info)
+                                        .set_buttons(MessageButtons::OkCancel)
+                                        .show();
+
+                                    match os_resp {
+                                        MessageDialogResult::Ok => {
+                                            let _ = self.db_manager.store_min_zaloga((
+                                                row.material,
+                                                self.edit_min_zaloga_row_input.clone().parse::<f64>().ok()),
+                                            );
+                                            self.row_data.query(&self.db_manager, &self.sort_state);
+                                        },
+                                        _ => {}
+                                    }
+                                }
+
+                            } else {
+                                let label_text = row.minimalna_zaloga.map_or(" ".repeat(28), |v| format_number_custom(v, 0));
+                                let resp = ui.label(label_text);
+                                if resp.double_clicked() {
+                                    self.editing_min_zaloga_row = Some(index);
+                                    self.edit_min_zaloga_row_input = row.minimalna_zaloga.map_or("".to_string(), |v| format_number_custom(v, 0));
+                                }
+
+                            }
+
+
                             row_color = old;
                         });
                         table_row.col(|ui| {
                             let old = row_color;
                             if row.maximalna_zaloga.is_some_and(|val| val < row.zaloga.unwrap_or(0.)) {
                                 // indigo
-                                row_color = Color32::from_rgb(153,51,255);
+                                row_color = INDIGO;
                             }
 
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.maximalna_zaloga.map_or("".to_string(), |v| format_number_custom(v)));
+
+                            if self.editing_max_zaloga_row == Some(index) {
+                                let response = ui.text_edit_singleline(&mut self.edit_max_zaloga_row_input);
+                                if response.lost_focus() {
+                                    self.editing_max_zaloga_row = None;
+
+                                    let os_resp = MessageDialog::new()
+                                        .set_title("Potrdi vnos")
+                                        .set_level(MessageLevel::Info)
+                                        .set_buttons(MessageButtons::OkCancel)
+                                        .show();
+
+                                    match os_resp {
+                                        MessageDialogResult::Ok => {
+                                            let _ = self.db_manager.store_max_zaloga((
+                                                                                         row.material,
+                                                                                         self.edit_max_zaloga_row_input.clone().parse::<f64>().ok()),
+                                            );
+                                            self.row_data.query(&self.db_manager, &self.sort_state);
+                                        },
+                                        _ => {}
+                                    }
+                                }
+
+                            } else {
+                                let label_text = row.maximalna_zaloga.map_or(" ".repeat(28), |v| format_number_custom(v, 0));
+                                let resp = ui.label(label_text);
+                                if resp.double_clicked() {
+                                    self.editing_max_zaloga_row = Some(index);
+                                    self.edit_max_zaloga_row_input = row.maximalna_zaloga.map_or("".to_string(), |v| format_number_custom(v, 0));
+                                }
+
+                            }
+
+
                             row_color = old;
                         });
 
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            let t = row.pakiranje.clone().unwrap_or_else(|| "".to_string());
-                            ui.label(&t);
+
+                            if self.editing_pakiranje_row == Some(index) {
+                                let response = ui.text_edit_singleline(&mut self.edit_pakiranje_input);
+                                if response.lost_focus() {
+                                    self.editing_pakiranje_row = None;
+
+                                    let os_resp = MessageDialog::new()
+                                        .set_title("Potrdi vnos")
+                                        .set_level(MessageLevel::Info)
+                                        .set_buttons(MessageButtons::OkCancel)
+                                        .show();
+
+                                    match os_resp {
+                                        MessageDialogResult::Ok => {
+                                            let _ = self.db_manager.store_pakiranje((
+                                                                                               row.material,
+                                                                                               self.edit_pakiranje_input.clone()),
+                                            );
+                                            self.row_data.query(&self.db_manager, &self.sort_state);
+                                        },
+                                        _ => {}
+                                    }
+                                }
+
+                            } else {
+                                let mut label_text = row.pakiranje.clone().unwrap_or_else(|| " ".repeat(20));
+                                if label_text.is_empty() {
+                                    label_text = " ".repeat(20);
+                                }
+                                let resp = ui.label(label_text.clone());
+                                if resp.double_clicked() {
+                                    self.editing_pakiranje_row = Some(index);
+                                    self.edit_pakiranje_input = String::new();
+                                }
+
+                            }
                         });
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            let t = row.blagovna_skupina.clone().unwrap_or_else(|| "".to_string());
-                            ui.label(&t);
+
+                            if self.editing_blagovna_skupina_row == Some(index) {
+                                let response = ui.text_edit_singleline(&mut self.edit_blagovna_skupina_input);
+                                if response.lost_focus() {
+                                    self.editing_blagovna_skupina_row = None;
+
+                                    let os_resp = MessageDialog::new()
+                                        .set_title("Potrdi vnos")
+                                        .set_level(MessageLevel::Info)
+                                        .set_buttons(MessageButtons::OkCancel)
+                                        .show();
+
+                                    match os_resp {
+                                        MessageDialogResult::Ok => {
+                                            let _ = self.db_manager.store_blagovna_skupina((
+                                                                                           row.material,
+                                                                                           self.edit_blagovna_skupina_input.clone()),
+                                            );
+                                            self.row_data.query(&self.db_manager, &self.sort_state);
+                                        },
+                                        _ => {}
+                                    }
+                                }
+
+                            } else {
+                                let mut label_text = row.blagovna_skupina.clone().unwrap_or_else(|| " ".repeat(73));
+                                if label_text.is_empty() {
+                                    label_text = " ".repeat(73);
+                                }
+                                let resp = ui.label(label_text.clone());
+                                if resp.double_clicked() {
+                                    self.editing_blagovna_skupina_row = Some(index);
+                                    self.edit_blagovna_skupina_input = String::new();
+                                }
+
+                            }
                         });
 
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            let t = row.opomba.clone().unwrap_or_else(|| "".to_string());
-                            ui.label(&t);//.on_hover_text(t);
+
+                            if self.editing_opomba_row == Some(index) {
+                                let response = ui.text_edit_singleline(&mut self.edit_opomba_input);
+                                if response.lost_focus() {
+                                    self.editing_opomba_row = None;
+
+                                    let os_resp = MessageDialog::new()
+                                        .set_title("Potrdi vnos")
+                                        .set_level(MessageLevel::Info)
+                                        .set_buttons(MessageButtons::OkCancel)
+                                        .show();
+
+                                    match os_resp {
+                                        MessageDialogResult::Ok => {
+                                            let _ = self.db_manager.store_opomba_to_db((
+                                                row.material,
+                                                self.edit_opomba_input.clone()),
+                                            );
+                                            self.row_data.query(&self.db_manager, &self.sort_state);
+                                        },
+                                        _ => {}
+                                    }
+                                }
+
+                            } else {
+                                let mut label_text = row.opomba.clone().unwrap_or_else(|| " ".repeat(73));
+                                if label_text.is_empty() {
+                                    label_text = " ".repeat(73);
+                                }
+                                let resp = ui.label(label_text.clone());
+                                if resp.double_clicked() {
+                                    self.editing_opomba_row = Some(index);
+                                    self.edit_opomba_input = String::new();
+                                }
+
+                            }
                         });
 
                         table_row.col(|ui| {
@@ -523,6 +695,53 @@ impl App {
     }
 }
 
+fn calculate_colors(row: &ViewQuery) -> Vec<Color32> {
+    let mut colors = Vec::with_capacity(6);
+    colors.push(Color32::TRANSPARENT);
+
+
+    if row.dobavni_rok.is_some() {
+        if row.odprta_narocila.is_some_and(|v| v != 0.) {
+            if row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.) <= row.dobavni_rok.unwrap_or(0.) {
+                colors.push(BLUE);
+            } else {
+                colors.push(GREEN);
+            }
+        }
+
+        if row.odprta_narocila.is_some_and(|v| v == 0.) {
+            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 {
+                colors.push(YELLOW);
+            }
+
+            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.0 {
+                colors.push(ORANGE);
+            }
+
+            if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.3 {
+                colors.push(RED);
+            }
+
+            if row.dobavni_rok.unwrap_or(0.) >= 90. {
+                colors.push(VIOLET);
+            }
+        }
+    }
+
+
+    if row.poraba_3m.is_some_and(|v| v == 0.) && row.poraba_24m.is_some_and(|v| v == 0.) {
+        colors.retain(|&color| {
+            !(color == YELLOW || color == ORANGE || color == RED)
+        });
+    }
+
+
+    colors
+}
+
+
+
+
 fn format_nabavnik<'a>(nabavna_skupina: &str) -> Option<&'a str> {
     match nabavna_skupina {
             "002" => Some("Neli"),
@@ -533,601 +752,328 @@ fn format_nabavnik<'a>(nabavna_skupina: &str) -> Option<&'a str> {
 }
 
 
-fn format_number_custom(value: f64) -> String {
-    let s = format!("{:.2}", value);
-    let parts = s.split('.').collect::<Vec<_>>();
-    if parts.len() == 2 {
-        let int_part = parts[0];
-        let dec_part = parts[1];
-        let int_part_with_sep = int_part.chars()
-            .rev()
-            .collect::<Vec<_>>()
-            .chunks(3)
-            .map(|chunk| chunk.iter().rev().collect::<String>())
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join(".");
-        format!("{},{}", int_part_with_sep, dec_part)
+fn format_number_custom(value: f64, precision: usize) -> String {
+    let factor = 10_f64.powi(precision as i32);
+    let scaled = (value * factor).round() as i64;
+
+    let int_part = scaled / factor as i64;
+    let mut dec_part = (scaled % factor as i64).abs().to_string();
+
+    // pad decimals (important!)
+    while dec_part.len() < precision {
+        dec_part = format!("0{}", dec_part);
+    }
+
+    let int_str = int_part.abs().to_string();
+
+    let int_part_with_sep = int_str
+        .chars()
+        .rev()
+        .collect::<Vec<_>>()
+        .chunks(3)
+        .map(|c| c.iter().rev().collect::<String>())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join(".");
+
+    let sign = if value < 0.0 { "-" } else { "" };
+
+    if precision == 0 {
+        format!("{}{}", sign, int_part_with_sep)
     } else {
-        s
+        format!("{}{},{}", sign, int_part_with_sep, dec_part)
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        if self.last_query.elapsed() >= Duration::from_mins(5) {
+            self.last_query = Instant::now();
 
+            self.row_data.query(&self.db_manager, &self.sort_state);
+        }
+
+        ctx.request_repaint_after(Duration::from_millis(100));
+
+        let data = match &self.row_data.row_data {
+            Some(d) => self.apply_filters(d),
+            None => Vec::new(),
+        };
+
+
+        let old_column = self.sort_state.sort_column;
+        let old_sort = self.sort_state.descending;
+
+
+
+
+        TopBottomPanel::top("Search").show(ctx, |ui| {
+            menu::bar(ui, |ui| {
+                ui.add(
+                    TextEdit::singleline(&mut self.filter_sifra_materiala)
+                        .hint_text("Iskanje po šifri materiala...")
+                );
+
+                ui.separator();
+                ui.add(
+                    TextEdit::singleline(&mut self.filter_naziv_materiala)
+                        .hint_text("Iskanje po nazivu materiala...")
+                );
+                ui.separator();
+                ui.add(
+                    TextEdit::singleline(&mut self.filter_nabavnik)
+                        .hint_text("Iskanje po nabavniku...")
+                );
+                ui.separator();
+                ui.add(
+                    TextEdit::singleline(&mut self.filter_dobavitelj)
+                        .hint_text("Iskanje po dobavitelju...")
+                );
+                ui.separator();
+                ui.add(
+                    TextEdit::singleline(&mut self.filter_blagovna_skupina)
+                        .hint_text("Iskanje po blagovni skupini...")
+                );
+            });
+        });
+
+        TopBottomPanel::top("checkboxi").show(ctx, |ui| {
+           menu::bar(ui, |ui| {
+               ui.horizontal(|ui| {
+                   ui.vertical(|ui| {
+                       ui.add_space(5.);
+
+                       ui.horizontal(|ui| {
+                           ui.checkbox(&mut self.filter_zaloga_vecja, "Zaloga večja kot");
+                           ui.add(
+                               TextEdit::singleline(&mut self.filter_zaloga_gt)
+                                   .desired_width(25.)
+                           );
+                       });
+
+                   });
+
+                   ui.separator();
+
+                   ui.horizontal(|ui| {
+                       ui.checkbox(&mut self.filter_poraba_vecja, "Poraba večja kot");
+                       ui.add(
+                           TextEdit::singleline(&mut self.filter_poraba_gt)
+                               .desired_width(25.)
+                       );
+                   });
+
+                   ui.separator();
+
+                   ui.horizontal(|ui| {
+                       ui.checkbox(&mut self.filter_odprta_narocila, "Odprta naročila večja kot");
+                       ui.add(
+                           TextEdit::singleline(&mut self.filter_odprta_narocila_gt)
+                               .desired_width(25.)
+                       );
+                   });
+
+                   ui.separator();
+
+                   ui.horizontal(|ui| {
+                       ui.checkbox(&mut self.filter_dobavni_rok, "Dobavni rok večji kot");
+                       ui.add(
+                           TextEdit::singleline(&mut self.filter_dobavni_rok_gt)
+                               .desired_width(25.)
+                       );
+                   });
+
+                   ui.separator();
+
+                   ui.horizontal(|ui| {
+                       ui.checkbox(&mut self.filter_min_zaloga, "Min zaloga večja kot");
+                       ui.add(
+                           TextEdit::singleline(&mut self.filter_min_zaloga_gt)
+                               .desired_width(25.)
+                       );
+                   });
+
+                   ui.separator();
+
+                   ui.horizontal(|ui| {
+                       ui.checkbox(&mut self.filter_max_zaloga, "Max zaloga večja kot");
+                       ui.add(
+                           TextEdit::singleline(&mut self.filter_max_zaloga_gt)
+                               .desired_width(25.)
+                       );
+                   });
+
+                   ui.separator();
+
+                   ui.checkbox(&mut self.filter_opomba, "Artikel ima opombo");
+
+                   ui.separator();
+
+                   ui.checkbox(&mut self.filter_no_dobavni_rok, "Nima dobavnega roka");
+               });
+
+
+           });
+        });
+
+        TopBottomPanel::top("barve").show(ctx, |ui| {
+           menu::bar(ui, |ui| {
+               ui.horizontal(|ui| {
+                   ui.checkbox(&mut self.filter_rumena, RichText::new("Rumeni").color(YELLOW));
+                   ui.separator();
+                   ui.checkbox(&mut self.filter_oranzna, RichText::new("Oranžni").color(ORANGE));
+                   ui.separator();
+                   ui.checkbox(&mut self.filter_rdeca, RichText::new("Rdeči").color(RED));
+                   ui.separator();
+                   ui.checkbox(&mut self.filter_modra, RichText::new("Modri").color(BLUE));
+                   ui.separator();
+                   ui.checkbox(&mut self.filter_zelena, RichText::new("Zeleni").color(GREEN));
+                   ui.separator();
+                   ui.checkbox(&mut self.filter_viola, RichText::new("Viola").color(VIOLET));
+                   ui.separator();
+                   ui.checkbox(&mut self.filter_teal, RichText::new("Smaragdna").color(TEAL));
+                   ui.separator();
+                   ui.checkbox(&mut self.filter_indigo, RichText::new("Indigo").color(INDIGO));
+               });
+           });
+        });
+
+        TopBottomPanel::top("main").show(ctx, |ui| {
+           menu::bar(ui, |ui| {
+               if ui.button("Osveži").clicked() {
+                   self.row_data.query(&self.db_manager, &self.sort_state);
+               }
+
+               ui.separator();
+
+               ui.horizontal(|ui| {
+                   if ui.button("Izvozi").clicked() {
+                       let mut resp: Result<(), Box<dyn std::error::Error>> = Ok(());
+
+                       let _ = self.row_data.row_data.as_ref().map(|d| { resp = export_filtered_to_excel(&self.apply_filters(&d)); });
+                       match resp {
+                           Err(err) => {
+                               println!("export error: {:?}", err);
+                               MessageDialog::new().set_title("Napaka").set_description("Napaka pri izvozu").set_level(MessageLevel::Error).show();
+                           },
+                           Ok(_) => {
+                               MessageDialog::new().set_title("Uspeh").set_description("Uspešno izvozil").set_level(MessageLevel::Info).show();
+                           }
+                       }
+                   }
+               });
+
+               ui.separator();
+
+               let reset = ui.button("Ponastavi filtre");
+               if reset.clicked() {
+                   self.filter_sifra_materiala = String::new();
+                   self.filter_naziv_materiala = String::new();
+                   self.filter_nabavnik = String::new();
+                   self.filter_dobavitelj = String::new();
+                   self.filter_zaloga_vecja = false;
+                   self.filter_zaloga_gt = String::from("0");
+                   self.filter_blagovna_skupina = String::new();
+
+                   self.filter_poraba_vecja = false;
+                   self.filter_poraba_gt = String::from("0");
+
+                   self.filter_nabavnik_definiran = false;
+                   self.filter_nabavnik_ni_definiran = false;
+
+                   self.filter_odprta_narocila = false;
+                   self.filter_odprta_narocila_gt = String::from("0");
+
+                   self.filter_dobavni_rok = true;
+                   self.filter_dobavni_rok_gt = String::from("0");
+
+                   self.filter_min_zaloga = false;
+                   self.filter_min_zaloga_gt = String::from("0");
+
+                   self.filter_max_zaloga = false;
+                   self.filter_max_zaloga_gt = String::from("0");
+
+                   self.filter_opomba = false;
+                   self.filter_no_dobavni_rok = false;
+
+                   self.filter_rumena = false;
+                   self.filter_oranzna = false;
+                   self.filter_rdeca = false;
+                   self.filter_modra = false;
+                   self.filter_zelena = false;
+                   self.filter_viola = false;
+                   self.filter_teal = false;
+                   self.filter_indigo = false;
+
+
+                   self.sort_state = SortState::default();
+                   self.row_data.query(&self.db_manager, &self.sort_state);
+               }
+
+
+               ui.separator();
+
+               if ui.button("Vnos Excel-ov").clicked() {
+                   let dir = dirs_next::document_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
+                   let files = rfd::FileDialog::new()
+                       .set_title("Izberi vse datoteke")
+                       .set_directory(dir)
+                       .pick_files();
+                   if files.is_some() {
+                       match self.db_manager.drop_non_permanent() {
+                           Err(e) => println!("dropping error: {}", e),
+                           Ok(_) => println!("Successfully dropped data")
+                       }
+
+                       match parse_all_files(files.unwrap(), &self.db_manager) {
+                           Ok(_) => {
+                               MessageDialog::new()
+                                   .set_title("Uspeh")
+                                   .set_description("Shranil Excel-e")
+                                   .set_level(MessageLevel::Info)
+                                   .show();
+                           },
+                           Err(e) => {
+                               MessageDialog::new()
+                                   .set_title("Napaka")
+                                   .set_description(format!("Napaka pri obdelavi Excel-ov\n {:?}", e.to_string()))
+                                   .set_level(MessageLevel::Error)
+                                   .show();
+                           },
+                       }
+                   }
+
+               }
+
+               ui.separator();
+
+               ui.label(format!("Število zadetkov: {}", &data.len()));
+
+
+               ui.separator();
+               ui.radio_value(&mut self.sort_state.descending, false, "Naraščujoče");
+               ui.radio_value(&mut self.sort_state.descending, true, "Padajoče");
+           });
+        });
 
         CentralPanel::default().show(ctx, |ui| {
-            ui.vertical(|ui| {
-                if let Some(success) = self.successfully_loaded_query {
-                    let color = if success { Color32::GREEN } else { Color32::RED };
-                    ui.colored_label(color, "■");
-                }
-                if ui.button("Naloži").clicked() {
-                    self.row_data.query(&self.db_manager, &self.sort_state);
-                }
-
-                ui.horizontal(|ui| {
-                    if ui.button("Izvozi").clicked() {
-                        let mut resp: Result<(), Box<dyn std::error::Error>> = Ok(());
-
-                        let _ = self.row_data.row_data.as_ref().map(|d| { resp = export_filtered_to_excel(&self.apply_filters(&d)); });
-                        match resp {
-                            Err(err) => {
-                                println!("export error: {:?}", err);
-                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri izvozu").set_level(MessageLevel::Error).show();
-                            },
-                            Ok(_) => {
-                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno izvozil").set_level(MessageLevel::Info).show();
-                            }
-                        }
-                    }
-                });
-
-            });
-
-            let data = match &self.row_data.row_data {
-                Some(d) => self.apply_filters(d),
-                None => Vec::new(),
-            };
-
-
-            ui.label(format!("Število zadetkov: {}", &data.len()));
-
-            ui.add_space(4.0);
-
             ScrollArea::vertical().show(ui, |ui| {
                 self.render_table(ui, &data);
             });
         });
 
-        Window::new("Filtri")
-            .resizable(false)
-            .default_open(false)
-            .fixed_pos(pos2(80., 5.))
-            .order(Order::Middle)
-            .default_size(vec2(300., 400.))
-            .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    ui.add(
-                        TextEdit::singleline(&mut self.filter_sifra_materiala)
-                            .hint_text("Iskanje po šifri materiala...")
-                    );
-                    ui.add(
-                        TextEdit::singleline(&mut self.filter_naziv_materiala)
-                            .hint_text("Iskanje po nazivu materiala...")
-                    );
-                    ui.add(
-                        TextEdit::singleline(&mut self.filter_nabavnik)
-                            .hint_text("Iskanje po nabavniku...")
-                    );
 
-                    ui.add(
-                        TextEdit::singleline(&mut self.filter_dobavitelj)
-                            .hint_text("Iskanje po dobavitelju...")
-                    );
+        let new_column = self.sort_state.sort_column;
+        let new_sort = self.sort_state.descending;
 
-                    ui.add(
-                        TextEdit::singleline(&mut self.filter_blagovna_skupina)
-                            .hint_text("Iskanje po blagovni skupini...")
-                    );
-
-
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.filter_zaloga_vecja, "zaloga večja kot");
-                        ui.add(
-                            TextEdit::singleline(&mut self.filter_zaloga_gt)
-                                .desired_width(50.)
-                        );
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.filter_poraba_vecja, "poraba večja kot");
-                        ui.add(
-                            TextEdit::singleline(&mut self.filter_poraba_gt)
-                                .desired_width(50.)
-                        );
-                    });
-
-
-
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.filter_odprta_narocila, "odprta naročila večja kot");
-                        ui.add(
-                            TextEdit::singleline(&mut self.filter_odprta_narocila_gt)
-                                .desired_width(50.)
-                        );
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.filter_dobavni_rok, "dobavni rok večji kot");
-                        ui.add(
-                            TextEdit::singleline(&mut self.filter_dobavni_rok_gt)
-                                .desired_width(50.)
-                        );
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.filter_min_zaloga, "Min zaloga večja kot");
-                        ui.add(
-                            TextEdit::singleline(&mut self.filter_min_zaloga_gt)
-                                .desired_width(50.)
-                        );
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.filter_max_zaloga, "Max zaloga večja kot");
-                        ui.add(
-                            TextEdit::singleline(&mut self.filter_max_zaloga_gt)
-                                .desired_width(50.)
-                        );
-                    });
-
-                    ui.checkbox(&mut self.filter_opomba, "Artikel ima opombo");
-                    ui.checkbox(&mut self.filter_no_dobavni_rok, "Nima dobavnega roka");
-
-
-                    ui.collapsing("Barve", |ui| {
-                        ui.vertical(|ui| {
-                            ui.checkbox(&mut self.filter_rumena, "Rumeni");
-                            ui.checkbox(&mut self.filter_oranzna, "Oranžni");
-                            ui.checkbox(&mut self.filter_rdeca, "Rdeči");
-                            ui.checkbox(&mut self.filter_modra, "Modri");
-                            ui.checkbox(&mut self.filter_zelena, "Zeleni");
-                            ui.checkbox(&mut self.filter_viola, "Viola");
-                            ui.checkbox(&mut self.filter_teal, "Smaragdna");
-                            ui.checkbox(&mut self.filter_indigo, "Indigo");
-                        });
-                    });
-
-
-
-
-                    let reset = ui.button("Ponastavi filtre");
-                    if reset.clicked() {
-                        self.filter_sifra_materiala = String::new();
-                        self.filter_naziv_materiala = String::new();
-                        self.filter_nabavnik = String::new();
-                        self.filter_dobavitelj = String::new();
-                        self.filter_zaloga_vecja = false;
-                        self.filter_zaloga_gt = String::from("0");
-                        self.filter_blagovna_skupina = String::new();
-
-                        self.filter_poraba_vecja = false;
-                        self.filter_poraba_gt = String::from("0");
-
-                        self.filter_nabavnik_definiran = false;
-                        self.filter_nabavnik_ni_definiran = false;
-
-                        self.filter_odprta_narocila = false;
-                        self.filter_odprta_narocila_gt = String::from("0");
-
-                        self.filter_dobavni_rok = true;
-                        self.filter_dobavni_rok_gt = String::from("0");
-
-                        self.filter_min_zaloga = false;
-                        self.filter_min_zaloga_gt = String::from("0");
-
-                        self.filter_max_zaloga = false;
-                        self.filter_max_zaloga_gt = String::from("0");
-
-                        self.filter_opomba = false;
-                        self.filter_no_dobavni_rok = false;
-
-                        self.filter_rumena = false;
-                        self.filter_oranzna = false;
-                        self.filter_rdeca = false;
-                        self.filter_modra = false;
-                        self.filter_zelena = false;
-                        self.filter_viola = false;
-                        self.filter_teal = false;
-                        self.filter_indigo = false;
-
-
-                        self.sort_state = SortState::default();
-                        self.row_data.query(&self.db_manager, &self.sort_state);
-                    }
-                });
-            });
-
-
-        Window::new("Ročni Vnosi")
-            .resizable(false)
-            .collapsible(true)
-            .default_open(false)
-            .fixed_pos(pos2(185., 5.))
-            .order(Order::Middle)
-            .default_size(vec2(300., 200.))
-            .show(ctx, |ui| {
-                let spacing = 40.;
-
-
-                ui.vertical_centered(|ui| {
-                    ui.add(
-                        TextEdit::singleline(&mut self.dobavni_rok_material)
-                            .hint_text("Šifra materiala...")
-                    );
-                    ui.add(
-                        TextEdit::singleline(&mut self.dobavni_rok_dobavni_rok)
-                            .hint_text("Dobavni rok...")
-                    );
-
-                    let dobavni_rok = ui.button("Shrani dobavni rok");
-                    if dobavni_rok.clicked() {
-                        let resp = self.db_manager.store_dobavni_rok((
-                            self.dobavni_rok_material.parse().unwrap_or(0),
-                            parse_string_to_optional_f64(self.dobavni_rok_dobavni_rok.as_str()),
-                        ));
-                        match resp {
-                            Err(err) => {
-                                println!("error storing opomba: {:?}", err.to_string());
-                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju").set_level(MessageLevel::Error).show();
-                            },
-                            Ok(_) => {
-                                println!("stored opomba!");
-                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil dobavni rok").set_level(MessageLevel::Info).show();
-                            }
-                        }
-
-                        self.row_data.query(&self.db_manager, &self.sort_state);
-                    }
-
-
-                    ui.add_space(spacing);
-
-
-
-                    ui.add(
-                        TextEdit::singleline(&mut self.opomba_material)
-                            .hint_text("Šifra materiala...")
-                    );
-                    ui.add(
-                        TextEdit::singleline(&mut self.opomba_opomba)
-                            .hint_text("Opomba...")
-                    );
-
-                    let store_opomba = ui.button("Shrani opombo");
-                    if store_opomba.clicked() {
-                        let resp = self.db_manager.store_opomba_to_db((self.opomba_material.parse().unwrap_or(0), self.opomba_opomba.clone()));
-                        match resp {
-                            Err(err) => {
-                                println!("error storing opomba: {:?}", err.to_string());
-                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju opombe").set_level(MessageLevel::Error).show();
-                            },
-                            Ok(_) => {
-                                println!("stored opomba!");
-                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil opombo").set_level(MessageLevel::Info).show();
-                            }
-                        }
-
-                        self.row_data.query(&self.db_manager, &self.sort_state);
-                    }
-
-
-
-                    ui.add_space(spacing);
-
-
-
-                    ui.add(
-                        TextEdit::singleline(&mut self.min_zaloga_material)
-                            .hint_text("Šifra materiala...")
-                    );
-                    ui.add(
-                        TextEdit::singleline(&mut self.min_zaloga_min_zaloga)
-                            .hint_text("Minimalna zaloga...")
-                    );
-
-                    let store_min_zaloga = ui.button("Shrani minimalno zalogo");
-                    if store_min_zaloga.clicked() {
-                        let resp = self.db_manager.store_min_zaloga((self.min_zaloga_material.parse().unwrap_or(0), self.min_zaloga_min_zaloga.clone().parse::<f64>().ok()));
-                        match resp {
-                            Err(err) => {
-                                println!("error storing min zaloga: {:?}", err.to_string());
-                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju minimalne zaloge").set_level(MessageLevel::Error).show();
-                            },
-                            Ok(_) => {
-                                println!("stored min zaloga!");
-                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil minimalno zalogo").set_level(MessageLevel::Info).show();
-                            }
-                        }
-
-                        self.row_data.query(&self.db_manager, &self.sort_state);
-                    }
-
-
-
-                    ui.add_space(spacing);
-
-
-
-                    ui.add(
-                        TextEdit::singleline(&mut self.max_zaloga_material)
-                            .hint_text("Šifra materiala...")
-                    );
-                    ui.add(
-                        TextEdit::singleline(&mut self.max_zaloga_max_zaloga)
-                            .hint_text("Maximalna zaloga...")
-                    );
-
-                    let store_max_zaloga = ui.button("Shrani maximalno zalogo");
-                    if store_max_zaloga.clicked() {
-                        let resp = self.db_manager.store_max_zaloga((self.max_zaloga_material.parse().unwrap_or(0), self.max_zaloga_max_zaloga.clone().parse::<f64>().ok()));
-                        match resp {
-                            Err(err) => {
-                                println!("error storing max zaloga: {:?}", err.to_string());
-                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju maximalno zalogo").set_level(MessageLevel::Error).show();
-                            },
-                            Ok(_) => {
-                                println!("stored max zaloga!");
-                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil maximalno zalogo").set_level(MessageLevel::Info).show();
-                            }
-                        }
-
-                        self.row_data.query(&self.db_manager, &self.sort_state);
-                    }
-
-
-
-                    ui.add_space(spacing);
-
-
-
-                    ui.add(
-                        TextEdit::singleline(&mut self.blagovna_skupina_material)
-                            .hint_text("Šifra materiala...")
-                    );
-                    ui.add(
-                        TextEdit::singleline(&mut self.blagovna_skupina_blagovna_skupina)
-                            .hint_text("Blagovna skupina...")
-                    );
-
-                    let store_blagovna_skupina = ui.button("Shrani blagovno skupino");
-                    if store_blagovna_skupina.clicked() {
-                        let resp = self.db_manager.store_blagovna_skupina((self.blagovna_skupina_material.parse().unwrap_or(0), self.blagovna_skupina_blagovna_skupina.clone()));
-                        match resp {
-                            Err(err) => {
-                                println!("error storing blagovna skupina: {:?}", err.to_string());
-                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju blagovne skupine").set_level(MessageLevel::Error).show();
-                            },
-                            Ok(_) => {
-                                println!("stored blagovna skupina!");
-                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil blagovno skupino").set_level(MessageLevel::Info).show();
-                            }
-                        }
-
-                        self.row_data.query(&self.db_manager, &self.sort_state);
-                    }
-
-
-                    ui.add_space(spacing);
-
-
-
-                    ui.add(
-                        TextEdit::singleline(&mut self.pakiranje_material)
-                            .hint_text("Šifra materiala...")
-                    );
-                    ui.add(
-                        TextEdit::singleline(&mut self.pakiranje_pakiranje)
-                            .hint_text("Pakiranje...")
-                    );
-
-                    let store_pakiranje = ui.button("Shrani pakiranje");
-                    if store_pakiranje.clicked() {
-                        let resp = self.db_manager.store_pakiranje((self.pakiranje_material.parse().unwrap_or(0), self.pakiranje_pakiranje.clone()));
-                        match resp {
-                            Err(err) => {
-                                println!("error storing pakiranje: {:?}", err.to_string());
-                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju pakiranja").set_level(MessageLevel::Error).show();
-                            },
-                            Ok(_) => {
-                                println!("stored blagovna skupina!");
-                                rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil pakiranje").set_level(MessageLevel::Info).show();
-                            }
-                        }
-
-                        self.row_data.query(&self.db_manager, &self.sort_state);
-                    }
-                });
-
-            });
-
-
-        Window::new("Razvrstitev")
-            .resizable(false)
-            .collapsible(true)
-            .default_open(false)
-            .fixed_pos(pos2(345., 5.))
-            .order(Order::Middle)
-            .default_size(vec2(200., 150.))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    let old_column = self.sort_state.sort_column;
-
-                    ComboBox::from_label("")
-                        .selected_text(self.sort_state.sort_column.as_str())
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Material, "Material");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::NazivMateriala, "Naziv");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::NabavnaSkupina, "Nabavnik");
-                            //ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::MRP, "MRP");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Zaloga, "Zaloga");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Poraba3M, "Poraba 3M");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Poraba24M, "Poraba 24M");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::OdprtaNarocila, "Odprto");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::DobavniRok, "Dobava");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaZadostujeZaMesecev, "Zaloga SAP");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Sum Zaloga");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::OsnovnaMerskaEnota, "Enota");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Dobavitelji, "Dobavitelji");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::MinimalnaZaloga, "Min zaloga");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::MaximalnaZaloga, "Max zaloga");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Pakiranje, "Pakiranje");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::BlagovnaSkupina, "Blagovna Skupina");
-                            ui.selectable_value(&mut self.sort_state.sort_column, SortColumn::Opomba, "Opomba");
-                        });
-                    if old_column != self.sort_state.sort_column ||
-                        ui.checkbox(&mut self.sort_state.descending, "Padajoče").changed()
-                    {
-                        self.row_data.query(&self.db_manager, &self.sort_state);
-                    }
-                });
-            });
-
-
-
-        Window::new("Vnos Excel-ov")
-            .resizable(false)
-            .collapsible(true)
-            .default_open(false)
-            .fixed_pos(pos2(500., 5.))
-            .order(Order::Middle)
-            .default_size(vec2(300., 200.))
-            .show(ctx, |ui| {
-                let sifrant_button = ui.button("Šifrant").on_hover_text("ŠIFRANT.XLSX");
-                let import_button = ui.button("Poraba, Zaloga, Odprta naročila").on_hover_text("PORABA.XLSX, ZALOGA.XLSX, ODPRTA NAROČILA.XLSX");
-                let dobavitelji_button = ui.button("Dobavitelji").on_hover_text("DOBAVITELJI.XLSX");
-                if import_button.clicked() {
-                    let downloads_dir = dirs_next::download_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
-                    let files = rfd::FileDialog::new()
-                        .set_title("Izberi 4 datoteke!")
-                        .set_directory(downloads_dir)
-                        .pick_files();
-                    if files.is_some() {
-                        match self.db_manager.drop_data() {
-                            Err(e) => println!("dropping error: {}", e),
-                            Ok(_) => println!("Successfully dropped data")
-                        }
-
-                        let result = parse_import_files(files.unwrap());
-                        match result {
-                            Ok(row_data) => {
-                                let db_result = self.db_manager.store_to_data(row_data);
-                                match db_result {
-                                    Ok(_) => {
-                                        rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil podatke").set_level(MessageLevel::Info).show();
-                                    },
-                                    Err(err) => {
-                                        println!("data: {:?}", err);
-                                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju podatkov").set_level(MessageLevel::Error).show();
-                                    }
-                                }
-                            },
-                            Err(_) => {
-                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri branju Excel-a").set_level(MessageLevel::Error).show();
-                            }
-                        }
-                    } else {
-                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri branju pri dobivanju datotek").set_level(MessageLevel::Error).show();
-                    }
-                }
-
-
-                if sifrant_button.clicked() {
-                    let downloads_dir = dirs_next::download_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
-                    let file = rfd::FileDialog::new()
-                        .set_title("Izberi 1 datoteko!")
-                        .set_directory(downloads_dir)
-                        .pick_file();
-                    if file.is_some() {
-                        let result = parse_sifrant_file(file.unwrap());
-                        match result {
-                            Ok(rows) => {
-                                let db_result = self.db_manager.store_sifrant_to_db(rows);
-                                match db_result {
-                                    Ok(_) => {
-                                        rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil šifrant").set_level(MessageLevel::Info).show();
-                                    },
-                                    Err(err) => {
-                                        println!("Šifrant: {:?}", err);
-                                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju šifranta").set_level(MessageLevel::Error).show();
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                println!("{}", e);
-                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napačno ime datoteke, ŠIFRANT.XLSX").set_level(MessageLevel::Error).show();
-                            }
-                        }
-                    } else {
-                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri dobivanju datoteke").set_level(MessageLevel::Error).show();
-                    }
-                }
-
-                if dobavitelji_button.clicked() {
-                    let downloads_dir = dirs_next::download_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
-                    let file = rfd::FileDialog::new()
-                        .set_title("Izberi 1 datoteko!")
-                        .set_directory(downloads_dir)
-                        .pick_file();
-                    if file.is_some() {
-                        let result = parse_dobavitelji_file(file.unwrap());
-                        match result {
-                            Ok(rows) => {
-                                let db_result = self.db_manager.store_dobavitelji_to_db(rows);
-                                match db_result {
-                                    Ok(_) => {
-                                        rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno shranil dobavitelje").set_level(MessageLevel::Info).show();
-                                    },
-                                    Err(err) => {
-                                        println!("Dobavitelji: {:?}", err);
-                                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri shranjevanju dobaviteljev").set_level(MessageLevel::Error).show();
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                println!("{}", e);
-                            }
-                        }
-                    } else {
-                        rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri dobivanju datoteke").set_level(MessageLevel::Error).show();
-                    }
-                }
-
-
-                let delete = ui.button("Izbriši ne ročno vnesene tabele").on_hover_text("Izbriši pred posodabljanjem!");
-                if delete.clicked() {
-                    let res = self.db_manager.drop_all_tables();
-                    match res {
-                        Err(e) => {
-                            if !e.to_string().eq("no such table: data (code 1)") {
-                                println!("{}", e);
-                                rfd::MessageDialog::new().set_title("Napaka").set_description("Napaka pri brisanju podatkov").set_level(MessageLevel::Error).show();
-                            }
-                        },
-                        Ok(_) => {
-                            rfd::MessageDialog::new().set_title("Uspeh").set_description("Uspešno zbrisal podatke").set_level(MessageLevel::Info).show();
-                        }
-                    }
-                }
-            });
-
-
+        if old_sort != new_sort || old_column != new_column {
+            self.row_data.query(&self.db_manager, &self.sort_state);
+        }
     }
+
+
 }
 
 
@@ -1256,7 +1202,6 @@ fn parse_string_to_optional_f64(s: &str) -> Option<f64> {
 }
 
 fn main() {
-
     eframe::run_native(
         "Magneti Excel",
         NativeOptions::default(),

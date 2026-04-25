@@ -8,10 +8,10 @@ pub struct DBManager {
 impl DBManager {
     pub fn try_create_tables(&self) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
-        self.create_data_table(&connection)?;
         self.create_sifrant_table(&connection)?;
-        self.create_opomba_table(&connection)?;
         self.create_dobavni_rok_table(&connection)?;
+        self.create_data_table(&connection)?;
+        self.create_opomba_table(&connection)?;
         self.create_min_zaloga_table(&connection)?;
         self.create_max_zaloga_table(&connection)?;
         self.create_blagovna_skupina_table(&connection)?;
@@ -67,10 +67,14 @@ impl DBManager {
         Ok(())
     }
 
-    pub fn drop_data(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn drop_non_permanent(&self) -> Result<(), Box<dyn std::error::Error>> {
+
         let connection = sqlite::open(self.db_name.as_str())?;
         connection.execute("BEGIN TRANSACTION")?;
+        self.try_drop_view()?;
+        connection.execute("DROP TABLE sifrant;")?;
         connection.execute("DROP TABLE data;")?;
+        connection.execute("DROP TABLE dobavitelji;")?;
 
         connection.execute("COMMIT")?;
         Ok(())
@@ -381,25 +385,6 @@ impl DBManager {
         Ok(())
     }
 
-
-
-
-    pub fn drop_all_tables(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let connection = sqlite::open(self.db_name.as_str())?;
-        connection.execute("BEGIN TRANSACTION")?;
-        connection.execute("
-            DROP TABLE data;
-        ")?;
-        connection.execute("
-            DROP TABLE sifrant;
-        ")?;
-        connection.execute("
-            DROP TABLE dobavitelji;
-        ")?;
-
-        connection.execute("COMMIT")?;
-        Ok(())
-    }
 
 
     pub fn try_drop_view(&self) -> Result<(), Box<dyn std::error::Error>> {

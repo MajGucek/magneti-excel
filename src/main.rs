@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(deprecated)] // I am not learning a whole new ecosystem
 
 mod parse;
 mod db;

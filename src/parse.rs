@@ -5,13 +5,17 @@ use chrono::{Local, Months, NaiveDate};
 use crate::db::DBManager;
 
 pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Trying to drop non permanent {:?}", db_manager.drop_non_permanent());
+    
     let sifrant_file = files.iter().filter(|file| {
         match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
             "ŠIFRANT.XLSX" => true,
             _ => false,
         }
     }).cloned().take(1).collect::<PathBuf>();
+    println!("Started parsing sifrant file");
     parse_sifrant_file(sifrant_file).and_then(|rows| {
+        println!("Finished parsing sifrant file");
         db_manager.store_sifrant_to_db(rows)
     })?;
 
@@ -21,7 +25,9 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
             _ => false,
         }
     }).cloned().take(1).collect::<PathBuf>();
+    println!("Started parsing dobavitelji file");
     parse_dobavitelji_file(dobavitelji_file).and_then(|rows| {
+        println!("Finished parsing dobavitelji file");
         db_manager.store_dobavitelji_to_db(rows)
     })?;
 
@@ -32,14 +38,76 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
             _ => false,
         }
     }).cloned().collect::<Vec<PathBuf>>();
+    println!("Started parsing 3 files");
     parse_import_files(import_files).and_then(|row_data| {
+        println!("Finished parsing 3 files");
         db_manager.store_to_data(row_data)
     })?;
 
 
+    let poraba_file = files.iter().filter(|file| {
+        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+            "PORABA.XLSX" => true,
+            _ => false,
+        }
+    }).cloned().take(1).collect::<PathBuf>();
+    println!("Started parsing poraba file");
+    parse_poraba_file(poraba_file).and_then(|row_data| {
+        println!("Finished parsing poraba file");
+        db_manager.store_poraba_to_db(row_data)
+    })?;
+    
+    db_manager.try_create_view()?;
 
 
+    println!("Finished parsing ALL files"); 
     Ok(())
+}
+
+pub struct PorabaData {
+    pub material: i64,
+    pub poraba: f64,
+    pub date: NaiveDate,
+}
+
+pub fn parse_poraba_file(file: PathBuf) -> Result<Vec<PorabaData>, Box<dyn std::error::Error>> {
+    if !file.file_name().unwrap().eq("PORABA.XLSX") {
+        Err("Bad filename!")?;
+    }
+    let mut workbook = open_workbook_auto(file)?;
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let mut poraba_rows: Vec<PorabaData> = Vec::with_capacity(1000);
+    for (index, row) in range.rows().skip(1).enumerate() {
+        println!("Parsing poraba, INDEX: {}", index);
+        let material = row.get(1)
+            .and_then(DataType::get_string)
+            .map(|f| f.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0);
+        if material == 0 { continue; }
+
+
+        let date = row.get(8)
+            .and_then(DataType::get_datetime)
+            .map(|date| {
+                let  (y, m, d, _, _, _, _) = date.to_ymd_hms_milli();
+                NaiveDate::from_ymd_opt(y as i32, m as u32, d as u32).unwrap_or(NaiveDate::default())
+            })
+            .unwrap_or(NaiveDate::default());
+        
+        let poraba = row.get(9)
+            .and_then(DataType::get_float)
+            .map(|f| f.abs())
+            .unwrap_or(0.);
+
+        poraba_rows.push(PorabaData {
+            material,
+            poraba,
+            date
+        })
+    }
+
+
+    Ok(poraba_rows)
 }
 
 

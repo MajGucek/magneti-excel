@@ -4,8 +4,11 @@
 mod parse;
 mod db;
 use std::time::{Duration, Instant};
+use chrono::{Datelike, Utc};
 use eframe::{NativeOptions};
 use eframe::egui::*;
+use eframe::egui::Ui;
+use eframe::epaint::RectShape;
 use egui_extras::{Column, TableBuilder};
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use rust_xlsxwriter::{Format, Workbook};
@@ -29,6 +32,8 @@ struct App {
 
     row_data: Rows,
     sort_state: SortState,
+
+    poraba_data: PorabaRows,
 
     /* --Filters-- */
     filter_rdeca: bool,
@@ -127,6 +132,7 @@ impl App {
 
             row_data: Rows {row_data},
             sort_state,
+            poraba_data: PorabaRows {material: 0, months: Vec::new(), poraba: Vec::new()},
 
             filter_rdeca: false,
             filter_oranzna: false,
@@ -191,6 +197,225 @@ impl App {
 }
 
 
+struct PorabaRows {
+    material: i64,
+    months: Vec<String>,
+    poraba: Vec<f64>,
+}
+impl PorabaRows {
+    fn render(&self, ui: &mut Ui) -> bool {
+        if self.months.is_empty() {
+            return false;
+        }
+
+        ui.set_min_size(vec2(1500.0, 800.0));
+
+        let title_rect = {
+            let title_height = 50.0;
+            Rect::from_min_max(
+                pos2(ui.min_rect().left(), ui.min_rect().top()),
+                pos2(ui.min_rect().right(), ui.min_rect().top() + title_height),
+            )
+        };
+
+        ui.painter().rect_filled(
+            title_rect,
+            Rounding::same(0),
+            Color32::WHITE,
+        );
+
+        ui.painter().text(
+            pos2(title_rect.center().x, title_rect.center().y),
+            Align2::CENTER_CENTER,
+            &format!("Poraba - {}", self.material),
+            FontId::proportional(20.0),
+            Color32::BLACK,
+        );
+
+        let rect = ui.max_rect();  // Chart area (below title)
+        let padding = vec2(60.0, 40.0);
+
+        let plot_rect = Rect::from_min_max(
+            pos2(rect.left(), rect.top() + 50.),  // Skip title space
+            pos2(rect.right(), rect.bottom()),
+        );
+
+        let slot_width = (plot_rect.width() - padding.x * 2.0) / self.months.len() as f32;
+        let bar_width = slot_width * 0.7;
+
+        let max_value = self.poraba.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)).max(1.0);
+
+        // Background
+        ui.painter().rect_filled(plot_rect, Rounding::same(0), Color32::from_gray(240));
+
+        // Grid lines
+        let y_step = max_value / 10.0;
+        for i in 0..=10 {
+            let y_value = (i as f64) * y_step;
+            let y_pos = plot_rect.bottom() - padding.y -
+                (y_value / max_value * (plot_rect.height() - padding.y * 2.0) as f64) as f32;
+
+            ui.painter().text(
+                pos2(plot_rect.left() + 40.0, y_pos),
+                Align2::RIGHT_CENTER,
+                &format!("{:.0}", y_value),
+                FontId::proportional(11.0),
+                Color32::BLACK,
+            );
+
+            ui.painter().line_segment(
+                [
+                    pos2(plot_rect.left() + padding.x, y_pos),
+                    pos2(plot_rect.right() - padding.x, y_pos)
+                ],
+                Stroke::new(0.5, Color32::from_gray(180)),
+            );
+        }
+
+        // Vertical grid
+        for i in (0..self.months.len()).step_by(3) {
+            let x = plot_rect.left() + padding.x + (i as f32) * slot_width;
+            ui.painter().line_segment(
+                [
+                    pos2(x, plot_rect.top() + padding.y),
+                    pos2(x, plot_rect.bottom() - padding.y)
+                ],
+                Stroke::new(0.3, Color32::from_gray(190)),
+            );
+        }
+
+        for (i, (&value, month)) in self.poraba.iter().zip(&self.months).enumerate() {
+
+
+            let x = plot_rect.left() + padding.x + (i as f32) * slot_width + (slot_width - bar_width) / 2.0;
+            let bar_height = (value / max_value * (plot_rect.height() - padding.y * 2.0) as f64) as f32;
+
+            let bar_rect = Rect::from_min_max(
+                pos2(x, plot_rect.bottom() - padding.y - bar_height),
+                pos2(x + bar_width, plot_rect.bottom() - padding.y),
+            );
+
+            ui.painter().add(RectShape {
+                rect: bar_rect,
+                corner_radius: Default::default(),
+                fill: Color32::GREEN,
+                stroke: Stroke::new(1.0, Color32::DARK_GREEN),
+                stroke_kind: StrokeKind::Inside,
+                round_to_pixels: None,
+                blur_width: 0.0,
+                brush: None,
+            });
+
+            ui.painter().text(
+                pos2(x + bar_width / 2.0, plot_rect.bottom() - 20.0),
+                Align2::CENTER_CENTER,
+                month.split("-").collect::<Vec<&str>>().join("\n  "),
+                FontId::proportional(12.0),
+                Color32::BLACK,
+            );
+        }
+
+        ui.interact(rect, ui.id(), Sense::click()).clicked()
+    }
+
+    fn query(&mut self, material: i64, db_manager: &DBManager) -> Option<bool> {
+        let raw_data: Vec<(String, f64)> = match db_manager.get_poraba(material) {
+            Ok(rows) => {
+                let mut data = Vec::new();
+                for row in rows {
+                    data.push((row.month.clone(), row.poraba));
+                }
+                data
+            }
+            Err(err) => {
+                println!("DB error: {:?}", err);
+                return Some(false);
+            }
+        };
+
+        if raw_data.is_empty() {
+            self.months.clear();
+            self.poraba.clear();
+            return Some(true);
+        }
+
+        let month_data: Vec<((i32, u32), String, f64)> = raw_data
+            .iter()
+            .filter_map(|(month_str, value)| {
+                let parts: Vec<&str> = month_str.split('-').collect();
+                if parts.len() == 2 {
+                    if let (Ok(year), Ok(month)) = (
+                        parts[0].parse::<i32>(),
+                        parts[1].parse::<u32>()
+                    ) {
+                        Some(((year, month), month_str.clone(), *value))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let today_year = Utc::now().year();
+        let today_month = Utc::now().month();
+
+        let mut months = Vec::new();
+        let mut poraba = Vec::new();
+
+        let first = month_data[0].clone();
+        months.push(first.1.clone());
+        poraba.push(first.2);
+        let mut prev_year = first.0 .0;
+        let mut prev_month = first.0 .1;
+
+        for ((year, month), month_str, value) in month_data.iter().skip(1) {
+            let mut current_month = prev_month + 1;
+            let mut current_year = prev_year;
+            if current_month > 12 {
+                current_month = 1;
+                current_year += 1;
+            }
+
+            while current_year < *year || (current_year == *year && current_month < *month) {
+                months.push(format!("{:04}-{:02}", current_year, current_month));
+                poraba.push(0.0);
+                current_month += 1;
+                if current_month > 12 {
+                    current_month = 1;
+                    current_year += 1;
+                }
+            }
+
+            months.push(month_str.clone());
+            poraba.push(*value);
+            prev_year = *year;
+            prev_month = *month;
+        }
+
+
+        let mut current_month = prev_month + 1;
+        let mut current_year = prev_year;
+        while current_year < today_year || (current_year == today_year && current_month <= today_month) {
+            months.push(format!("{:04}-{:02}", current_year, current_month));
+            poraba.push(0.0);
+            current_month += 1;
+            if current_month > 12 {
+                current_month = 1;
+                current_year += 1;
+            }
+        }
+
+
+        self.material = material;
+        self.months = months;
+        self.poraba = poraba;
+
+        Some(true)
+    }
+}
+
 struct Rows {
     row_data: Option<Vec<ViewQuery>>
 }
@@ -245,9 +470,9 @@ impl App {
 
                     color_matches |= self.filter_modra && row.dobavni_rok.is_some() && has_open_orders &&
                         row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.) <= row.dobavni_rok.unwrap_or(0.);
-                    
-                    
-                    
+
+
+
                     color_matches |= self.filter_zelena && row.dobavni_rok.is_some() && has_open_orders &&
                         !(row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.) <= row.dobavni_rok.unwrap_or(0.));
 
@@ -344,7 +569,7 @@ impl App {
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Pakiranje, "Pakiranje"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::BlagovnaSkupina, "Blagovna Skupina"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Opomba, "Opomba"); });
-                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::NabavnaSkupina, "Nabavnik").on_hover_text("002 Neli\n008 Viktorija\n010 Boštjan"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::NabavnaSkupina, "Nabavnik").on_hover_text("002 Neli\n008 Viktoriia\n010 Boštjan"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Dobavitelji, "Dobavitelji"); });
                     //header.col(|ui| {ui.heading("MRP"); });
                 })
@@ -359,7 +584,10 @@ impl App {
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.material.to_string());
+                            if ui.label(RichText::new(row.material.to_string()).underline().background_color(Color32::TRANSPARENT)).clicked() {
+
+                                self.poraba_data.query(row.material, &self.db_manager);
+                            }
                         });
 
                         table_row.col(|ui| {
@@ -750,7 +978,7 @@ fn calculate_colors(row: &ViewQuery) -> Vec<Color32> {
 fn format_nabavnik<'a>(nabavna_skupina: &str) -> Option<&'a str> {
     match nabavna_skupina {
             "002" => Some("Neli"),
-            "008" => Some("Viktoria"),
+            "008" => Some("Viktoriia"),
             "010" => Some("Boštjan"),
             _ => None,
         }
@@ -793,6 +1021,7 @@ fn format_number_custom(value: f64, precision: usize) -> String {
 }
 
 impl eframe::App for App {
+
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         if self.last_query.elapsed() >= Duration::from_mins(5) {
             self.last_query = Instant::now();
@@ -1034,6 +1263,7 @@ impl eframe::App for App {
 
                        match parse_all_files(files.unwrap(), &self.db_manager) {
                            Ok(_) => {
+                               println!("Success");
                                MessageDialog::new()
                                    .set_title("Uspeh")
                                    .set_description("Shranil Excel-e")
@@ -1041,6 +1271,7 @@ impl eframe::App for App {
                                    .show();
                            },
                            Err(e) => {
+                               println!("Fail");
                                MessageDialog::new()
                                    .set_title("Napaka")
                                    .set_description(format!("Napaka pri obdelavi Excel-ov\n {:?}", e.to_string()))
@@ -1068,6 +1299,17 @@ impl eframe::App for App {
                 self.render_table(ui, &data);
             });
         });
+
+        let mut chart_clicked = false;
+        Area::new(Id::from("chart"))
+            .anchor(Align2::RIGHT_BOTTOM, [-25., -25.])
+            .show(ctx, |ui| {
+                chart_clicked = self.poraba_data.render(ui);
+                if ui.input(|i| i.pointer.any_pressed()) && !chart_clicked {
+                    self.poraba_data.months.clear();
+                    self.poraba_data.poraba.clear();
+                }
+            });
 
 
         let new_column = self.sort_state.sort_column;
@@ -1207,6 +1449,8 @@ fn parse_string_to_optional_f64(s: &str) -> Option<f64> {
 }
 
 fn main() {
+
+
     eframe::run_native(
         "Magneti Excel",
         NativeOptions::default(),

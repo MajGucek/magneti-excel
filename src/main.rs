@@ -233,6 +233,7 @@ impl App {
                 if any_color_filter_active {
                     let months_left = row.dobavni_rok.map_or(0., |dr| row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - dr);
                     let no_open_orders = row.odprta_narocila.is_some_and(|v| v == 0.);
+                    let has_open_orders = row.odprta_narocila.is_some_and(|v| v != 0.);
                     let no_3m_no_24m = !(row.poraba_3m.is_some_and(|v| v == 0.) && row.poraba_24m.is_some_and(|v| v == 0.));
 
                     color_matches |= self.filter_rumena && row.dobavni_rok.is_some() && months_left >= 1.0 && months_left < 1.5 && no_open_orders && no_3m_no_24m;
@@ -242,12 +243,15 @@ impl App {
                     color_matches |= self.filter_viola && row.dobavni_rok.is_some() && row.dobavni_rok.unwrap_or(0.) >= 90. &&
                         no_open_orders;
 
-                    color_matches |= self.filter_modra && row.dobavni_rok.is_some() && !no_open_orders &&
+                    color_matches |= self.filter_modra && row.dobavni_rok.is_some() && has_open_orders &&
                         row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.) <= row.dobavni_rok.unwrap_or(0.);
-                    color_matches |= self.filter_zelena && row.dobavni_rok.is_some() && !no_open_orders &&
+                    
+                    
+                    
+                    color_matches |= self.filter_zelena && row.dobavni_rok.is_some() && has_open_orders &&
                         !(row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.) <= row.dobavni_rok.unwrap_or(0.));
 
-                    color_matches |= self.filter_teal && row.minimalna_zaloga.is_some_and(|val| val > row.zaloga.unwrap_or(0.));
+                    color_matches |= self.filter_teal && row.minimalna_zaloga.is_some_and(|val| val > (row.zaloga.unwrap_or(0.) + row.odprta_narocila.unwrap_or(0.)));
                     color_matches |= self.filter_indigo && row.maximalna_zaloga.is_some_and(|val| val < row.zaloga.unwrap_or(0.));
                 }
                 // ---- //

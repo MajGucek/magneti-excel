@@ -5,7 +5,6 @@ mod parse;
 mod db;
 
 use std::collections::HashMap;
-use std::env;
 use std::time::{Duration, Instant};
 use chrono::{Datelike, Utc};
 use eframe::{NativeOptions};

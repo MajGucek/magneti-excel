@@ -10,15 +10,17 @@ impl DBManager {
     pub fn try_create_tables(&self) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
         self.create_sifrant_table(&connection)?;
-        self.create_dobavni_rok_table(&connection)?;
         self.create_data_table(&connection)?;
+        self.create_poraba_table(&connection)?;
+        self.create_nabava_table(&connection)?;
+        self.create_dobavitelji_table(&connection)?;
+
+        self.create_dobavni_rok_table(&connection)?;
         self.create_opomba_table(&connection)?;
         self.create_min_zaloga_table(&connection)?;
         self.create_max_zaloga_table(&connection)?;
         self.create_blagovna_skupina_table(&connection)?;
         self.create_pakiranje_table(&connection)?;
-        self.create_poraba_table(&connection)?;
-        self.create_nabava_table(&connection)?;
 
         Ok(())
     }
@@ -74,36 +76,75 @@ impl DBManager {
         ")?;
         connection.execute("CREATE INDEX IF NOT EXISTS idx_data_material ON data(material);")?;
         connection.execute("COMMIT")?;
-        println!("Created Data Table");
+        log::info!("Created Data Table");
         Ok(())
     }
 
     pub fn drop_non_permanent(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.drop_sifrant()?;
+        self.drop_data()?;
+        self.drop_dobavitelji()?;
+        self.drop_porabe()?;
+        self.drop_nabave()?;
 
+        Ok(())
+    }
+
+    pub fn drop_sifrant(&self) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
         connection.execute("BEGIN TRANSACTION")?;
         connection.execute("DROP TABLE sifrant;")?;
-
-        println!("Dropped sifrant");
         connection.execute("COMMIT")?;
+        log::info!("Dropped sifrant");
+
+        Ok(())
+    }
+
+    pub fn drop_data(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        connection.execute("BEGIN TRANSACTION")?;
         connection.execute("DROP TABLE data;")?;
-
-        println!("Dropped data");
         connection.execute("COMMIT")?;
+        log::info!("Dropped data");
+
+        Ok(())
+    }
+
+    pub fn drop_dobavitelji(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        connection.execute("BEGIN TRANSACTION")?;
         connection.execute("DROP TABLE dobavitelji;")?;
-
-        println!("Dropped dobavitelji");
         connection.execute("COMMIT")?;
+        log::info!("Dropped dobavitelji");
+
+        Ok(())
+    }
+
+    pub fn drop_porabe(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        connection.execute("BEGIN TRANSACTION")?;
         connection.execute("DROP TABLE porabe;")?;
-
-        println!("Dropped porabe");
         connection.execute("COMMIT")?;
+        log::info!("Dropped porabe");
+
+        Ok(())
+    }
+
+    pub fn drop_nabave(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("DROP TABLE nabave;")?;
+        connection.execute("COMMIT")?;
+        log::info!("Dropped nabave");
+
         Ok(())
     }
 
 
+
     pub fn store_to_data(&self, row_data: Vec<RowData>) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
+        let _ = self.drop_data();
         self.create_data_table(&connection)?;
 
         let mut statement = connection.prepare("
@@ -114,8 +155,8 @@ impl DBManager {
                 odprta_narocila = excluded.odprta_narocila
         ")?;
         connection.execute("BEGIN TRANSACTION")?;
-        for (index, row) in row_data.iter().enumerate() {
-            println!("data: INSERTING: {}", index);
+        log::info!("Started inserting into data");
+        for row in row_data.iter() {
             statement.bind((1, row.material))?;
             statement.bind((2, row.zaloga))?;
             statement.bind((3, row.poraba_3m))?;
@@ -125,8 +166,7 @@ impl DBManager {
             statement.reset()?;
         }
         connection.execute("COMMIT")?;
-        println!("Stored to table data");
-        //self.try_create_view()?;
+        log::info!("Stored to table data: {}", row_data.len());
         Ok(())
     }
 
@@ -142,12 +182,13 @@ impl DBManager {
             );
         ")?;
         connection.execute("COMMIT")?;
-        println!("Created porabe table");
+        log::info!("Created porabe table");
         Ok(())
     }
 
     pub fn store_poraba_to_db(&self, rows: Vec<PorabaData>) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
+        let _ = self.drop_porabe();
         self.create_poraba_table(&connection)?;
 
         let mut statement = connection.prepare("
@@ -155,8 +196,8 @@ impl DBManager {
         ")?;
 
         connection.execute("BEGIN TRANSACTION")?;
-        for (ind, poraba_row) in rows.iter().enumerate() {
-            println!("porabe: INSERTING: {}", ind);
+        log::info!("Started inserting into poraba");
+        for poraba_row in rows.iter() {
             statement.bind((1, poraba_row.material))?;
             statement.bind((2, poraba_row.poraba))?;
             statement.bind(&[(3, convert_to_sql(poraba_row.date).as_str())][..])?;
@@ -164,8 +205,7 @@ impl DBManager {
             statement.reset()?;
         }
         connection.execute("COMMIT")?;
-        println!("Stored to table Porabe");
-        //self.try_create_view()?;
+        log::info!("Stored to table Porabe: {}", rows.len());
         Ok(())
     }
 
@@ -180,12 +220,13 @@ impl DBManager {
             );
         ")?;
         connection.execute("COMMIT")?;
-        println!("Created nabave table");
+        log::info!("Created nabave table");
         Ok(())
     }
 
     pub fn store_nabava_to_db(&self, rows: Vec<NabavaData>) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
+        let _ = self.drop_nabave();
         self.create_nabava_table(&connection)?;
 
         let mut statement = connection.prepare("
@@ -193,8 +234,8 @@ impl DBManager {
         ")?;
 
         connection.execute("BEGIN TRANSACTION")?;
-        for (ind, nabava_row) in rows.iter().enumerate() {
-            println!("nabave: INSERTING: {}", ind);
+        log::info!("Started inserting into nabava");
+        for nabava_row in rows.iter() {
             statement.bind((1, nabava_row.material))?;
             statement.bind((2, nabava_row.nabava))?;
             statement.bind(&[(3, convert_to_sql(nabava_row.date).as_str())][..])?;
@@ -202,8 +243,7 @@ impl DBManager {
             statement.reset()?;
         }
         connection.execute("COMMIT")?;
-        println!("Stored to table Nabave");
-        //self.try_create_view()?;
+        log::info!("Stored to table Nabave: {}", rows.len());
         Ok(())
     }
 
@@ -217,12 +257,13 @@ impl DBManager {
             );
         ")?;
         connection.execute("COMMIT")?;
-        println!("Created dobavitelji table");
+        log::info!("Created dobavitelji table");
         Ok(())
     }
 
     pub fn store_dobavitelji_to_db(&self, rows: Vec<DobaviteljRow>) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
+        let _ = self.drop_dobavitelji();
         self.create_dobavitelji_table(&connection)?;
 
         let mut statement = connection.prepare("
@@ -230,17 +271,15 @@ impl DBManager {
         ")?;
 
         connection.execute("BEGIN TRANSACTION")?;
-        for (ind, dobavitelj_row) in rows.iter().enumerate() {
-            println!("dobavitelji: INSERTING: {}", ind);
+        log::info!("Started inserting into dobavitelji");
+        for dobavitelj_row in rows.iter() {
             statement.bind((1, dobavitelj_row.material))?;
             statement.bind(&[(2, dobavitelj_row.dobavitelj.as_str())][..])?;
             statement.next()?;
             statement.reset()?;
         }
         connection.execute("COMMIT")?;
-        println!("Stored to dobavitelji table");
-
-        //self.try_create_view()?;
+        log::info!("Stored to dobavitelji table: {}", rows.len());
         Ok(())
     }
 
@@ -257,12 +296,13 @@ impl DBManager {
             );
         ")?;
         connection.execute("COMMIT")?;
-        println!("Created sifrant table");
+        log::info!("Created sifrant table");
         Ok(())
     }
 
     pub fn store_sifrant_to_db(&self, rows: Vec<SifrantRow>) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
+        let _ = self.drop_sifrant();
         self.create_sifrant_table(&connection)?;
 
         let mut statement = connection.prepare("
@@ -270,8 +310,8 @@ impl DBManager {
         ")?;
 
         connection.execute("BEGIN TRANSACTION")?;
-        for (ind, sifrant_row) in rows.iter().enumerate() {
-            println!("sifrant: INSERTING: {}", ind);
+        log::info!("Started inserting into sifrant");
+        for sifrant_row in rows.iter() {
             statement.bind((1, sifrant_row.material))?;
             statement.bind(&[(2, sifrant_row.naziv_materiala.as_str())][..])?;
             statement.bind(&[(3, sifrant_row.osnovna_merska_enota.as_str())][..])?;
@@ -282,8 +322,7 @@ impl DBManager {
         }
 
         connection.execute("COMMIT")?;
-        println!("Stored to sifrant table");
-        //self.try_create_view()?;
+        log::info!("Stored to sifrant table: {}", rows.len());
         Ok(())
     }
 
@@ -298,7 +337,7 @@ impl DBManager {
         ")?;
 
         connection.execute("COMMIT")?;
-        println!("Created pakiranja table");
+        log::info!("Created pakiranja table");
         Ok(())
     }
 
@@ -314,9 +353,7 @@ impl DBManager {
         statement.bind((2, pakiranje.1.as_str()))?;
         statement.next()?;
         connection.execute("COMMIT")?;
-        println!("Stored to pakiranja table");
-
-        //self.try_create_view()?;
+        log::info!("Stored to pakiranja table");
         Ok(())
     }
 
@@ -331,7 +368,7 @@ impl DBManager {
         connection.execute("CREATE INDEX IF NOT EXISTS idx_opombe_material ON opombe(material);")?;
 
         connection.execute("COMMIT")?;
-        println!("Created opombe table");
+        log::info!("Created opombe table");
         Ok(())
     }
 
@@ -347,9 +384,8 @@ impl DBManager {
         statement.bind((2, opomba.1.as_str()))?;
         statement.next()?;
         connection.execute("COMMIT")?;
-        println!("Stored to opombe table");
-
-        //self.try_create_view()?;
+        log::info!("Stored to opombe table");
+        
         Ok(())
     }
 
@@ -364,7 +400,7 @@ impl DBManager {
         ")?;
 
         connection.execute("COMMIT")?;
-        println!("Created blagovne_skupine table");
+        log::info!("Created blagovne_skupine table");
         Ok(())
     }
 
@@ -380,9 +416,7 @@ impl DBManager {
         statement.bind((2, blagovna_skupina.1.as_str()))?;
         statement.next()?;
         connection.execute("COMMIT")?;
-        println!("Stored to blagovne_skupine table");
-
-        //self.try_create_view()?;
+        log::info!("Stored to blagovne_skupine table");
         Ok(())
     }
 
@@ -397,7 +431,7 @@ impl DBManager {
         ")?;
 
         connection.execute("COMMIT")?;
-        println!("Created min. zaloge table");
+        log::info!("Created min. zaloge table");
         Ok(())
     }
 
@@ -413,9 +447,7 @@ impl DBManager {
         statement.bind((2, min_zaloga_row.1))?;
         statement.next()?;
         connection.execute("COMMIT")?;
-        println!("Stored to min. zaloge table");
-
-        //self.try_create_view()?;
+        log::info!("Stored to min. zaloge table");
         Ok(())
     }
 
@@ -429,7 +461,7 @@ impl DBManager {
         ")?;
 
         connection.execute("COMMIT")?;
-        println!("Created Max. zaloge table");
+        log::info!("Created Max. zaloge table");
         Ok(())
     }
 
@@ -445,9 +477,7 @@ impl DBManager {
         statement.bind((2, max_zaloga_row.1))?;
         statement.next()?;
         connection.execute("COMMIT")?;
-        println!("Stored to max. zaloge table");
-
-        //self.try_create_view()?;
+        log::info!("Stored to max. zaloge table");
         Ok(())
     }
 
@@ -463,7 +493,7 @@ impl DBManager {
         connection.execute("CREATE INDEX IF NOT EXISTS idx_dobavni_roki_material ON dobavni_roki(material);")?;
 
         connection.execute("COMMIT")?;
-        println!("Created dobavni_roki table");
+        log::info!("Created dobavni_roki table");
         Ok(())
     }
 
@@ -479,10 +509,7 @@ impl DBManager {
         statement.bind((2, dobavni_rok_row.1))?;
         statement.next()?;
         connection.execute("COMMIT")?;
-        println!("Stored to dobavni_roki table");
-
-
-        //self.try_create_view()?;
+        log::info!("Stored to dobavni_roki table");
         Ok(())
     }
 
@@ -497,7 +524,7 @@ impl DBManager {
     }
 
     pub fn try_create_view(&self) -> Result<(), Box<dyn std::error::Error>> {
-        println!("trying to create view");
+        log::info!("trying to create view");
         let connection = sqlite::open(self.db_name.as_str())?;
         connection.execute("
             CREATE VIEW IF NOT EXISTS view_podatki AS
@@ -535,7 +562,7 @@ impl DBManager {
             LEFT JOIN pakiranja pak ON s.material = pak.material
             ;
         ")?;
-        println!("Created View");
+        log::info!("Created View");
         Ok(())
     }
 }

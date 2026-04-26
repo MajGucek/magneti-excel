@@ -5,12 +5,14 @@ mod parse;
 mod db;
 
 use std::collections::HashMap;
+use std::env;
 use std::time::{Duration, Instant};
 use chrono::{Datelike, Utc};
 use eframe::{NativeOptions};
 use eframe::egui::*;
 use eframe::egui::Ui;
 use egui_extras::{Column, TableBuilder};
+use env_logger::Env;
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use rust_xlsxwriter::{Format, Workbook};
 use crate::db::{DBManager, SortColumn, SortState, ViewQuery};
@@ -117,12 +119,12 @@ impl App {
 
         match result {
             Err(err) => {
-                println!("initial_load error: {:?}", err.to_string());
+                log::error!("initial_load error: {:?}", err.to_string());
                 Some(false)
             },
             Ok(rows) => {
                 row_data = Some(rows);
-                println!("row_data loaded: {}", row_data.as_ref().unwrap().len());
+                log::info!("row_data loaded: {}", row_data.as_ref().unwrap().len());
                 Some(true)
             }
         };
@@ -379,7 +381,7 @@ impl PorabaNabavaRows {
                 data
             }
             Err(err) => {
-                println!("DB error: {:?}", err);
+                log::error!("DB error: {:?}", err);
                 Vec::new()
             }
         };
@@ -393,7 +395,7 @@ impl PorabaNabavaRows {
                 data
             }
             Err(err) => {
-                println!("DB error: {:?}", err);
+                log::error!("DB error: {:?}", err);
                 Vec::new()
             }
         };
@@ -510,7 +512,7 @@ impl Rows {
                 Some(true)
             }
             Err(err) => {
-                println!("query_load error: {:?}", err);
+                log::error!("query_load error: {:?}", err);
                 Some(false)
             }
         }
@@ -1273,7 +1275,7 @@ impl eframe::App for App {
                        let _ = self.row_data.row_data.as_ref().map(|d| { resp = export_filtered_to_excel(&self.apply_filters(&d)); });
                        match resp {
                            Err(err) => {
-                               println!("export error: {:?}", err);
+                               log::error!("export error: {:?}", err);
                                MessageDialog::new().set_title("Napaka").set_description("Napaka pri izvozu").set_level(MessageLevel::Error).show();
                            },
                            Ok(_) => {
@@ -1341,13 +1343,13 @@ impl eframe::App for App {
                        .pick_files();
                    if files.is_some() {
                        match self.db_manager.drop_non_permanent() {
-                           Err(e) => println!("dropping error: {}", e),
-                           Ok(_) => println!("Successfully dropped data")
+                           Err(e) => log::error!("dropping error: {}", e),
+                           Ok(_) => log::info!("Successfully dropped data")
                        }
-
-                       match parse_all_files(files.unwrap(), &self.db_manager) {
+                       let res = parse_all_files(files.unwrap(), &self.db_manager);
+                       ui.ctx().request_repaint();
+                       match res {
                            Ok(_) => {
-                               println!("Success");
                                MessageDialog::new()
                                    .set_title("Uspeh")
                                    .set_description("Shranil Excel-e")
@@ -1355,7 +1357,6 @@ impl eframe::App for App {
                                    .show();
                            },
                            Err(e) => {
-                               println!("Fail");
                                MessageDialog::new()
                                    .set_title("Napaka")
                                    .set_description(format!("Napaka pri obdelavi Excel-ov\n {:?}", e.to_string()))
@@ -1532,6 +1533,16 @@ fn parse_string_to_optional_f64(s: &str) -> Option<f64> {
 }
 
 fn main() {
+    let debug = true;
+
+    let level = if debug { "info" } else { "warn" };
+
+    env_logger::Builder::from_env(
+        Env::default().default_filter_or(level)
+    )
+        .init();
+
+    log::info!("App started");
 
 
     eframe::run_native(

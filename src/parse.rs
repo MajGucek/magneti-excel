@@ -6,7 +6,6 @@ use chrono::{Local, Months, NaiveDate};
 use crate::db::DBManager;
 
 pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Trying to drop non permanent {:?}", db_manager.drop_non_permanent());
     
     let sifrant_file = files.iter().filter(|file| {
         match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
@@ -14,9 +13,9 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
             _ => false,
         }
     }).cloned().take(1).collect::<PathBuf>();
-    println!("Started parsing sifrant file");
+    log::info!("Started parsing sifrant file");
     let _ = parse_sifrant_file(sifrant_file).and_then(|rows| {
-        println!("Finished parsing sifrant file");
+        log::info!("Finished parsing sifrant file");
         db_manager.store_sifrant_to_db(rows)
     });
 
@@ -26,9 +25,9 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
             _ => false,
         }
     }).cloned().take(1).collect::<PathBuf>();
-    println!("Started parsing dobavitelji file");
+    log::info!("Started parsing dobavitelji file");
     let _ = parse_dobavitelji_file(dobavitelji_file).and_then(|rows| {
-        println!("Finished parsing dobavitelji file");
+        log::info!("Finished parsing dobavitelji file");
         db_manager.store_dobavitelji_to_db(rows)
     });
 
@@ -39,9 +38,9 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
             _ => false,
         }
     }).cloned().collect::<Vec<PathBuf>>();
-    println!("Started parsing 3 files");
+    log::info!("Started parsing 3 files");
     let _ = parse_import_files(import_files).and_then(|row_data| {
-        println!("Finished parsing 3 files");
+        log::info!("Finished parsing 3 files");
         db_manager.store_to_data(row_data)
     });
 
@@ -52,28 +51,28 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
             _ => false,
         }
     }).cloned().take(1).collect::<PathBuf>();
-    println!("Started parsing poraba file");
+    log::info!("Started parsing poraba file");
     let _ = parse_poraba_file(poraba_file).and_then(|row_data| {
-        println!("Finished parsing poraba file");
+        log::info!("Finished parsing poraba file");
         db_manager.store_poraba_to_db(row_data)
     });
 
     let prevzemi_file = files.iter().filter(|file| {
         match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
-            "PREVZEMI.XLSX" => true,
+            "NABAVA.XLSX" => true,
             _ => false,
         }
     }).cloned().take(1).collect::<PathBuf>();
-    println!("Started parsing prevzemi file");
+    log::info!("Started parsing prevzemi file");
     let _ = parse_nabava_file(prevzemi_file).and_then(|row_data| {
-        println!("Finished parsing prevzemi file");
+        log::info!("Finished parsing prevzemi file");
         db_manager.store_nabava_to_db(row_data)
     });
     
     db_manager.try_create_view()?;
 
 
-    println!("Finished parsing ALL files"); 
+    log::info!("Finished parsing ALL files");
     Ok(())
 }
 
@@ -85,14 +84,14 @@ pub struct NabavaData {
 }
 
 pub fn parse_nabava_file(file: PathBuf) -> Result<Vec<NabavaData>, Box<dyn std::error::Error>> {
-    if !file.file_name().unwrap_or(OsString::default().as_os_str()).eq("PREVZEMI.XLSX") {
+    if !file.file_name().unwrap_or(OsString::default().as_os_str()).eq("NABAVA.XLSX") {
         Err("Bad filename!")?;
     }
     let mut workbook = open_workbook_auto(file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
-    let mut poraba_rows: Vec<NabavaData> = Vec::with_capacity(1000);
-    for (index, row) in range.rows().skip(1).enumerate() {
-        println!("Parsing poraba, INDEX: {}", index);
+    let mut nabava_rows: Vec<NabavaData> = Vec::with_capacity(1000);
+    log::info!("Started parsing nabava");
+    for row in range.rows().skip(1) {
         let material = row.get(1)
             .and_then(DataType::get_string)
             .map(|f| f.parse::<i64>().unwrap_or(0))
@@ -110,18 +109,18 @@ pub fn parse_nabava_file(file: PathBuf) -> Result<Vec<NabavaData>, Box<dyn std::
 
         let nabava = row.get(9)
             .and_then(DataType::get_float)
-            .map(|f| f.abs())
+            .map(|f| f)
             .unwrap_or(0.);
 
-        poraba_rows.push(NabavaData {
+        nabava_rows.push(NabavaData {
             material,
             nabava,
             date,
         })
     }
+    log::info!("Parsed nabava: {}", range.rows().len());
 
-
-    Ok(poraba_rows)
+    Ok(nabava_rows)
 }
 
 pub struct PorabaData {
@@ -137,8 +136,8 @@ pub fn parse_poraba_file(file: PathBuf) -> Result<Vec<PorabaData>, Box<dyn std::
     let mut workbook = open_workbook_auto(file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
     let mut poraba_rows: Vec<PorabaData> = Vec::with_capacity(1000);
-    for (index, row) in range.rows().skip(1).enumerate() {
-        println!("Parsing poraba, INDEX: {}", index);
+    log::info!("Started parsing poraba");
+    for row in range.rows().skip(1) {
         let material = row.get(1)
             .and_then(DataType::get_string)
             .map(|f| f.parse::<i64>().unwrap_or(0))
@@ -165,6 +164,7 @@ pub fn parse_poraba_file(file: PathBuf) -> Result<Vec<PorabaData>, Box<dyn std::
             date
         })
     }
+    log::info!("Parsed poraba: {}", range.rows().len());
 
 
     Ok(poraba_rows)
@@ -186,8 +186,8 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
     let mut workbook = open_workbook_auto(poraba_file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
     let mut poraba_map: HashMap<i64, Vec<(f64, NaiveDate)>> = HashMap::new();
+    log::info!("Started parsing poraba");
     for row in range.rows().skip(1) {
-
         let material = row.get(1)
             .and_then(DataType::get_string)
             .map(|f| f.parse::<i64>().unwrap_or(0))
@@ -215,6 +215,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
             .or_default();
         entry.push((klc_v_em_vnosa, datum));
     }
+    log::info!("Parsed poraba: {}", range.rows().len());
 
     let odprta_narocila_file = files.iter().find(|&path_buf| {
         path_buf.file_name().unwrap() == "ODPRTA NAROČILA.XLSX"
@@ -222,6 +223,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
     let mut workbook = open_workbook_auto(odprta_narocila_file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
     let mut dobava_map: HashMap<i64, f64> = HashMap::new();
+    log::info!("Started parsing odprta naročila");
     for row in range.rows().skip(1) {
         let material = row.get(0)
             .and_then(DataType::get_string)
@@ -240,6 +242,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
 
         *entry += se_za_dobavo;
     }
+    log::info!("Parsed odprta naročila: {}", range.rows().len());
 
 
     let zaloga_file = files.iter().find(|&path_buf| {
@@ -249,6 +252,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
     let mut row_data: Vec<RowData> = Vec::with_capacity(100);
     let mut zaloga_map: HashMap<i64, f64> = HashMap::new();
+    log::info!("Started parsing zaloga");
     for row in range.rows().skip(1) {
         let material = row.get(1)
             .and_then(DataType::get_string)
@@ -266,8 +270,10 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
             .or_insert(0.);
         *entry += zaloga;
     }
+    log::info!("Parsed zaloga: {}", range.rows().len());
 
 
+    log::info!("Parsing for data table");
     let key_set: HashSet<i64> = poraba_map.keys()
         .chain(dobava_map.keys())
         .chain(zaloga_map.keys())
@@ -316,6 +322,8 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
         });
     });
 
+    log::info!("Finished parsing import files");
+
     Ok(row_data)
 }
 
@@ -342,6 +350,7 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
     let mut row_data = Vec::new();
     let mut workbook = open_workbook_auto(path)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    log::info!("Started parsing sifrant");
     for row in range.rows().skip(1) {
         let material = row.get(0)
             .and_then(DataType::get_string)
@@ -375,6 +384,7 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
             mrp_karakteristika,
         });
     }
+    log::info!("Parsed sifrant: {}", range.rows().len());
 
     Ok(row_data)
 }
@@ -393,7 +403,7 @@ pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<d
     let mut workbook = open_workbook_auto(path)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
     let mut dobavitelji_map: HashMap<i64, Vec<String>> = HashMap::new();
-
+    log::info!("Started parsing dobavitelji");
     for row in range.rows().skip(1) {
         let material = row.get(0)
             .and_then(DataType::get_string)
@@ -424,6 +434,8 @@ pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<d
             dobavitelj: dobavitelji.join(", "),
         });
     });
+
+    log::info!("Parsed dobavitelji: {}", range.rows().len());
 
 
     Ok(row_data)

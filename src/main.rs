@@ -899,7 +899,7 @@ impl App {
                                 let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
                                 if resp.double_clicked() {
                                     self.editing_pakiranje_row = Some(index);
-                                    self.edit_pakiranje_input = String::new();
+                                    self.edit_pakiranje_input = row.pakiranje.clone().unwrap_or(String::new());
                                 }
 
                             }
@@ -932,14 +932,14 @@ impl App {
                                 }
 
                             } else {
-                                let mut label_text = row.blagovna_skupina.clone().unwrap_or_else(|| " ".repeat(73));
+                                let mut label_text = row.blagovna_skupina.clone().unwrap_or(" ".repeat(73));
                                 if label_text.is_empty() {
                                     label_text = " ".repeat(73);
                                 }
                                 let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
                                 if resp.double_clicked() {
                                     self.editing_blagovna_skupina_row = Some(index);
-                                    self.edit_blagovna_skupina_input = String::new();
+                                    self.edit_blagovna_skupina_input = row.blagovna_skupina.clone().unwrap_or(String::new());
                                 }
 
                             }
@@ -980,7 +980,7 @@ impl App {
                                 let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
                                 if resp.double_clicked() {
                                     self.editing_opomba_row = Some(index);
-                                    self.edit_opomba_input = String::new();
+                                    self.edit_opomba_input = row.opomba.clone().unwrap_or(String::new());
                                 }
 
                             }

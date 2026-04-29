@@ -17,7 +17,7 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
     let _ = parse_sifrant_file(sifrant_file).and_then(|rows| {
         log::info!("Finished parsing sifrant file");
         db_manager.store_sifrant_to_db(rows)
-    });
+    }).inspect_err(|e| log::error!("{}", e.to_string()));
 
     let dobavitelji_file = files.iter().filter(|file| {
         match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
@@ -29,7 +29,19 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
     let _ = parse_dobavitelji_file(dobavitelji_file).and_then(|rows| {
         log::info!("Finished parsing dobavitelji file");
         db_manager.store_dobavitelji_to_db(rows)
-    });
+    }).inspect_err(|e| log::error!("{}", e.to_string()));
+
+    let zaloga100_file = files.iter().filter(|file| {
+        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+            "ZALOGA100.XLSX" => true,
+            _ => false,
+        }
+    }).cloned().take(1).collect::<PathBuf>();
+    log::info!("Started parsing zaloga100 file");
+    let _ = parse_razpolozljiva_zaloga_file(zaloga100_file).and_then(|rows| {
+        log::info!("Finished parsing zaloga100 file");
+        db_manager.store_razpolozljive_zaloge_to_db(rows)
+    }).inspect_err(|e| log::error!("{}", e.to_string()));
 
 
     let import_files = files.iter().filter(|file| {
@@ -42,7 +54,8 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
     let _ = parse_import_files(import_files).and_then(|row_data| {
         log::info!("Finished parsing 3 files");
         db_manager.store_to_data(row_data)
-    });
+    }).inspect_err(|e| log::error!("{}", e.to_string()));
+
 
 
     let poraba_file = files.iter().filter(|file| {
@@ -55,7 +68,7 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
     let _ = parse_poraba_file(poraba_file).and_then(|row_data| {
         log::info!("Finished parsing poraba file");
         db_manager.store_poraba_to_db(row_data)
-    });
+    }).inspect_err(|e| log::error!("{}", e.to_string()));
 
     let prevzemi_file = files.iter().filter(|file| {
         match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
@@ -67,7 +80,7 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
     let _ = parse_nabava_file(prevzemi_file).and_then(|row_data| {
         log::info!("Finished parsing prevzemi file");
         db_manager.store_nabava_to_db(row_data)
-    });
+    }).inspect_err(|e| log::error!("{}", e.to_string()));
     
     db_manager.try_create_view()?;
 
@@ -436,7 +449,52 @@ pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<d
     });
 
     log::info!("Parsed dobavitelji: {}", range.rows().len());
+    Ok(row_data)
+}
 
+
+
+#[derive(Default)]
+pub struct RazpolozljivaZalogaRow {
+    pub material: i64,
+    pub razpolozljiva_zaloga: f64,
+}
+pub fn parse_razpolozljiva_zaloga_file(path: PathBuf) -> Result<Vec<RazpolozljivaZalogaRow>, Box<dyn std::error::Error>> {
+    if !path.file_name().unwrap_or(OsString::default().as_os_str()).eq("ZALOGA100.XLSX") {
+        Err("Bad filename!")?;
+    }
+    let mut row_data = Vec::new();
+    let mut workbook = open_workbook_auto(path)?;
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let mut zaloga_100_map: HashMap<i64, f64> = HashMap::new();
+    log::info!("Started parsing zaloga100");
+    for row in range.rows().skip(1) {
+        let material = row.get(0)
+            .and_then(DataType::get_string)
+            .map(|f| f.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0);
+        if material == 0 { continue; }
+
+        let razpolozljiva_zaloga = row.get(10)
+            .and_then(DataType::get_float)
+            .unwrap_or(0.);
+
+
+        let entry = zaloga_100_map
+            .entry(material)
+            .or_insert(0.);
+        *entry += razpolozljiva_zaloga;
+
+    }
+
+    zaloga_100_map.into_iter().for_each(|(material, razpolozljiva_zaloga)| {
+       row_data.push(RazpolozljivaZalogaRow {
+           material,
+           razpolozljiva_zaloga,
+       })
+    });
+
+    log::info!("Parsed zaloga100: {}", range.rows().len());
 
     Ok(row_data)
 }

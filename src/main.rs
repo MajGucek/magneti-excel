@@ -13,7 +13,7 @@ use eframe::egui::Ui;
 use egui_extras::{Column, TableBuilder};
 use env_logger::Env;
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
-use rust_xlsxwriter::{Format, Workbook};
+use rust_xlsxwriter::{Color, Format, Workbook};
 use crate::db::{DBManager, SortColumn, SortState, ViewQuery};
 use crate::parse::{parse_all_files};
 
@@ -246,7 +246,7 @@ impl PorabaNabavaRows {
             Align2::CENTER_CENTER,
             "Poraba",
             FontId::proportional(20.0),
-            Color32::GREEN,
+            Color32::LIGHT_RED,
         );
 
         ui.painter().text(
@@ -254,7 +254,7 @@ impl PorabaNabavaRows {
             Align2::CENTER_CENTER,
             "Nabava",
             FontId::proportional(20.0),
-            Color32::LIGHT_RED,
+            Color32::GREEN,
         );
 
 
@@ -336,13 +336,13 @@ impl PorabaNabavaRows {
 
             let (first, second) = if poraba_bar_height > nabava_bar_height {
                 (
-                    (poraba_bar_rect, green, dark_green),
-                    (nabava_bar_rect, light_red, red),
+                    (poraba_bar_rect, light_red, red),
+                    (nabava_bar_rect, green, dark_green),
                 )
             } else {
                 (
-                    (nabava_bar_rect, light_red, red),
-                    (poraba_bar_rect, green, dark_green),
+                    (nabava_bar_rect, green, dark_green),
+                    (poraba_bar_rect, light_red, red),
                 )
             };
 
@@ -370,7 +370,7 @@ impl PorabaNabavaRows {
         ui.interact(rect, ui.id(), Sense::click()).clicked()
     }
 
-    fn query(&mut self, material: i64, naziv: &str, db_manager: &DBManager) {
+    fn query(&mut self, material: i64, naziv: &str,  db_manager: &DBManager) {
         let raw_poraba_data: Vec<(String, f64)> = match db_manager.get_poraba(material) {
             Ok(rows) => {
                 let mut data = Vec::new();
@@ -615,14 +615,15 @@ impl App {
                 .striped(true)
                 .cell_layout(Layout::left_to_right(Align::Center))
                 .columns(Column::exact(100.), 1) // Material
-                .columns(Column::exact(300.), 1)// Naziv
-                .columns(Column::exact(85.), 1) // Zaloga
+                .columns(Column::exact(250.), 1)// Naziv
+                .columns(Column::exact(120.), 1) // Zaloga 100
+                .columns(Column::exact(120.), 1) // Zaloga Sum
                 .columns(Column::exact(120.5), 1)// Poraba 3M
                 .columns(Column::exact(120.5), 1)// Poraba 24M
                 .columns(Column::exact(90.), 1)// Odprto
                 .columns(Column::exact(90.), 1)// Dobava
                 .columns(Column::exact(110.), 1)// Zaloga SAP
-                .columns(Column::exact(120.), 1)// Sum Zaloga
+                .columns(Column::exact(160.), 1)// Zaloga Sum SAP
                 .columns(Column::exact(120.), 1)// Enota
                 .columns(Column::exact(120.), 1)// Minimalna zaloga
                 .columns(Column::exact(120.), 1)// Maximalna zaloga
@@ -636,8 +637,8 @@ impl App {
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Material, "Material"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::NazivMateriala, "Naziv"); });
 
-
-                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Zaloga, "Zaloga").on_hover_text("Trenutna zaloga v SAP-u"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::RazpolozljivaZaloga, "Zaloga 100"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Zaloga, "Zaloga Sum").on_hover_text("Trenutna zaloga v SAP-u"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Poraba3M, "Poraba 3M").on_hover_text("Povprečna mesečna poraba za zadnje 3 mesece"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Poraba24M, "Poraba 24M").on_hover_text("Povprečna mesečna poraba za zadnjih 12 mesecev"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::OdprtaNarocila, "Odprto").on_hover_text("Odprta naročila dobaviteljem"); });
@@ -645,7 +646,7 @@ impl App {
 
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaZadostujeZaMesecev, "Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
 
-                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Sum Zaloga").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Zaloga Sum SAP").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::OsnovnaMerskaEnota, "Enota"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::MinimalnaZaloga, "Min zaloga"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::MaximalnaZaloga, "Max zaloga"); });
@@ -680,6 +681,12 @@ impl App {
                             ui.label(row.naziv_materiala.clone().unwrap_or_else(|| "".to_string()));
                         });
 
+
+
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            ui.label(row.razpolozljiva_zaloga.map_or("".to_string(), |v| format_number_custom(v, 1)));
+                        });
 
 
 
@@ -932,7 +939,7 @@ impl App {
                                 }
 
                             } else {
-                                let mut label_text = row.blagovna_skupina.clone().unwrap_or(" ".repeat(73));
+                                let mut label_text = row.blagovna_skupina.clone().unwrap_or(" ".repeat(30));
                                 if label_text.is_empty() {
                                     label_text = " ".repeat(73);
                                 }
@@ -1347,6 +1354,7 @@ impl eframe::App for App {
                        }
                        let res = parse_all_files(files.unwrap(), &self.db_manager);
                        ui.ctx().request_repaint();
+                       self.row_data.query(&self.db_manager, &self.sort_state);
                        match res {
                            Ok(_) => {
                                MessageDialog::new()
@@ -1363,6 +1371,7 @@ impl eframe::App for App {
                                    .show();
                            },
                        }
+
                    }
 
                }
@@ -1415,107 +1424,51 @@ pub fn export_filtered_to_excel(
 
     worksheet.write_string(0, 0, "Material")?;
     worksheet.write_string(0, 1, "Naziv")?;
-    worksheet.write_string(0, 2, "Nabavnik")?;
-    worksheet.write_string(0, 3, "Zaloga")?;
+    worksheet.write_string(0, 2, "Zaloga 100")?;
+    worksheet.write_string(0, 3, "Zaloga Sum")?;
     worksheet.write_string(0, 4, "Poraba, Povprečna mesečna poraba za zadnje 3 mesece")?;
     worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnjih 24 mesecev")?;
     worksheet.write_string(0, 6, "Odprto, Odprta naročila dobaviteljem")?;
     worksheet.write_string(0, 7, "Dobava, Predviden dobavni rok v mesecih")?;
     worksheet.write_string(0, 8, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe")?;
-    worksheet.write_string(0, 9, "Sum Zaloga, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe")?;
+    worksheet.write_string(0, 9, "Zaloga Sum SAP, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe")?;
     worksheet.write_string(0, 10, "Enota")?;
-    worksheet.write_string(0, 11, "Dobavitelji")?;
-    worksheet.write_string(0, 12, "Minimalna Zaloga")?;
-    worksheet.write_string(0, 13, "Maximalna Zaloga")?;
-    worksheet.write_string(0, 14, "Pakiranje")?;
-    worksheet.write_string(0, 15, "Blagovna Skupina")?;
-    worksheet.write_string(0, 16, "Opomba")?;
+    worksheet.write_string(0, 11, "Minimalna Zaloga")?;
+    worksheet.write_string(0, 12, "Maximalna Zaloga")?;
+    worksheet.write_string(0, 13, "Pakiranje")?;
+    worksheet.write_string(0, 14, "Blagovna Skupina")?;
+    worksheet.write_string(0, 15, "Opomba")?;
+    worksheet.write_string(0, 16, "Nabavnik")?;
+    worksheet.write_string(0, 17, "Dobavitelji")?;
 
 
     for (row_idx, item) in data.iter().enumerate() {
         let row = (row_idx + 1) as u32;
+        let [r, g, b, _a] = calculate_colors(item).last().map(|&c| if c == Color32::TRANSPARENT {Color32::WHITE} else {c}).unwrap_or(Color32::WHITE).to_array();
+        let format = Format::new().set_background_color(Color::RGB(
+            ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+        ));
 
-        worksheet.write_number(row, 0, item.material as f64)?;
+        let empty = String::new();
+        worksheet.write_number_with_format(row, 0, item.material as f64, &format)?;
+        worksheet.write_string_with_format(row, 1, item.naziv_materiala.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_number_with_format(row, 2, item.razpolozljiva_zaloga.unwrap_or(0.), &format)?;
+        worksheet.write_number_with_format(row, 3, item.zaloga.unwrap_or(0.), &format)?;
+        worksheet.write_number_with_format(row, 4, item.poraba_3m.unwrap_or(0.), &format)?;
+        worksheet.write_number_with_format(row, 5, item.poraba_24m.unwrap_or(0.), &format)?;
+        worksheet.write_number_with_format(row, 6, item.odprta_narocila.unwrap_or(0.), &format)?;
+        worksheet.write_number_with_format(row, 7, item.dobavni_rok.unwrap_or(0.), &format)?;
+        worksheet.write_number_with_format(row, 8, item.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.), &format)?;
+        worksheet.write_number_with_format(row, 9, item.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.), &format)?;
+        worksheet.write_string_with_format(row, 10, item.osnovna_merska_enota.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_number_with_format(row, 11, item.minimalna_zaloga.unwrap_or(0.), &format)?;
+        worksheet.write_number_with_format(row, 12, item.maximalna_zaloga.unwrap_or(0.), &format)?;
+        worksheet.write_string_with_format(row, 13, item.pakiranje.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 14, item.blagovna_skupina.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 15, item.opomba.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 16, item.nabavna_skupina.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 17, item.dobavitelji.as_ref().unwrap_or(&empty), &format)?;
 
-        match &item.naziv_materiala {
-            Some(s) => worksheet.write_string(row, 1, s)?,
-            None => worksheet.write_blank(row, 1, &Format::default())?,
-        };
-
-        match &item.nabavna_skupina {
-            Some(s) => worksheet.write_string(row, 2, s)?,
-            None => worksheet.write_blank(row, 2, &Format::default())?,
-        };
-
-        match item.zaloga {
-            Some(v) => worksheet.write_number(row, 3, v)?,
-            None => worksheet.write_blank(row, 3, &Format::default())?,
-        };
-
-        match item.poraba_3m {
-            Some(v) => worksheet.write_number(row, 4, v)?,
-            None => worksheet.write_blank(row, 4, &Format::default())?,
-        };
-
-        match item.poraba_24m {
-            Some(v) => worksheet.write_number(row, 5, v)?,
-            None => worksheet.write_blank(row, 5, &Format::default())?,
-        };
-
-        match item.odprta_narocila {
-            Some(v) => worksheet.write_number(row, 6, v)?,
-            None => worksheet.write_blank(row, 6, &Format::default())?,
-        };
-
-        match item.dobavni_rok {
-            Some(v) => worksheet.write_number(row, 7, v)?,
-            None => worksheet.write_blank(row, 7, &Format::default())?,
-        };
-
-        match item.trenutna_zaloga_zadostuje_za_mesecev {
-            Some(v) => worksheet.write_number(row, 8, v)?,
-            None => worksheet.write_blank(row, 8, &Format::default())?,
-        };
-
-        match item.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev {
-            Some(v) => worksheet.write_number(row, 9, v)?,
-            None => worksheet.write_blank(row, 9, &Format::default())?,
-        };
-
-        match &item.osnovna_merska_enota {
-            Some(s) => worksheet.write_string(row, 10, s)?,
-            None => worksheet.write_blank(row, 10, &Format::default())?,
-        };
-
-        match &item.dobavitelji {
-            Some(s) => worksheet.write_string(row, 11, s)?,
-            None => worksheet.write_blank(row, 11, &Format::default())?,
-        };
-
-        match item.minimalna_zaloga {
-            Some(s) => worksheet.write_number(row, 12, s)?,
-            None => worksheet.write_blank(row, 12, &Format::default())?,
-        };
-
-        match item.maximalna_zaloga {
-            Some(s) => worksheet.write_number(row, 13, s)?,
-            None => worksheet.write_blank(row, 13, &Format::default())?,
-        };
-
-        match &item.pakiranje {
-            Some(s) => worksheet.write_string(row, 14, s)?,
-            None => worksheet.write_blank(row, 14, &Format::default())?,
-        };
-
-        match &item.blagovna_skupina {
-            Some(s) => worksheet.write_string(row, 15, s)?,
-            None => worksheet.write_blank(row, 15, &Format::default())?,
-        };
-
-        match &item.opomba {
-            Some(s) => worksheet.write_string(row, 16, s)?,
-            None => worksheet.write_blank(row, 16, &Format::default())?,
-        };
     }
 
     workbook.save("Analitika.xlsx")?;

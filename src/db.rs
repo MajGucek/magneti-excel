@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
 use sqlite::{Connection, State};
-use crate::parse::{DobaviteljRow, NabavaData, PorabaData, RowData, SifrantRow};
+use crate::parse::{DobaviteljRow, NabavaData, PorabaData, RowData, SifrantRow, RazpolozljivaZalogaRow};
 
 pub struct DBManager {
     pub db_name: String
@@ -14,6 +14,7 @@ impl DBManager {
         self.create_poraba_table(&connection)?;
         self.create_nabava_table(&connection)?;
         self.create_dobavitelji_table(&connection)?;
+        self.create_razpolozljive_zaloge_table(&connection)?;
 
         self.create_dobavni_rok_table(&connection)?;
         self.create_opomba_table(&connection)?;
@@ -45,7 +46,8 @@ impl DBManager {
         connection.execute("BEGIN TRANSACTION")?;
         connection.execute("
             CREATE TABLE IF NOT EXISTS data (
-                material INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY,
+                material INTEGER,
                 zaloga REAL,
                 poraba_3m REAL,
                 poraba_24m REAL,
@@ -74,7 +76,6 @@ impl DBManager {
                     ) VIRTUAL
             );
         ")?;
-        connection.execute("CREATE INDEX IF NOT EXISTS idx_data_material ON data(material);")?;
         connection.execute("COMMIT")?;
         log::info!("Created Data Table");
         Ok(())
@@ -84,6 +85,7 @@ impl DBManager {
         self.drop_sifrant()?;
         self.drop_data()?;
         self.drop_dobavitelji()?;
+        self.drop_razpolozljive_zaloge()?;
         self.drop_porabe()?;
         self.drop_nabave()?;
 
@@ -120,6 +122,16 @@ impl DBManager {
         Ok(())
     }
 
+    pub fn drop_razpolozljive_zaloge(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("DROP TABLE razpolozljive_zaloge;")?;
+        connection.execute("COMMIT")?;
+        log::info!("Dropped razpolozljive_zaloge");
+
+        Ok(())
+    }
+
     pub fn drop_porabe(&self) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
         connection.execute("BEGIN TRANSACTION")?;
@@ -148,11 +160,7 @@ impl DBManager {
         self.create_data_table(&connection)?;
 
         let mut statement = connection.prepare("
-            INSERT INTO data (material, zaloga, poraba_3m, poraba_24m, odprta_narocila) VALUES (?, ?, ?, ?, ?) ON CONFLICT(material) DO UPDATE SET
-                zaloga = excluded.zaloga,
-                poraba_3m = excluded.poraba_3m,
-                poraba_24m = excluded.poraba_24m,
-                odprta_narocila = excluded.odprta_narocila
+            INSERT INTO data (material, zaloga, poraba_3m, poraba_24m, odprta_narocila) VALUES (?, ?, ?, ?, ?)
         ")?;
         connection.execute("BEGIN TRANSACTION")?;
         log::info!("Started inserting into data");
@@ -244,6 +252,42 @@ impl DBManager {
         }
         connection.execute("COMMIT")?;
         log::info!("Stored to table Nabave: {}", rows.len());
+        Ok(())
+    }
+
+    fn create_razpolozljive_zaloge_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS razpolozljive_zaloge (
+                id INTEGER PRIMARY KEY,
+                material INTEGER NOT NULL,
+                razpolozljiva_zaloga REAL
+            );
+        ")?;
+        connection.execute("COMMIT")?;
+        log::info!("Created razpolozljive_zaloge table");
+        Ok(())
+    }
+
+    pub fn store_razpolozljive_zaloge_to_db(&self, rows: Vec<RazpolozljivaZalogaRow>) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        let _ = self.drop_razpolozljive_zaloge();
+        self.create_razpolozljive_zaloge_table(&connection)?;
+
+        let mut statement = connection.prepare("
+            INSERT INTO razpolozljive_zaloge (material, razpolozljiva_zaloga) VALUES (?, ?)
+        ")?;
+
+        connection.execute("BEGIN TRANSACTION")?;
+        log::info!("Started inserting into razpolozljive_zaloge");
+        for razpolozljiva_zaloga_row in rows.iter() {
+            statement.bind((1, razpolozljiva_zaloga_row.material))?;
+            statement.bind((2, razpolozljiva_zaloga_row.razpolozljiva_zaloga))?;
+            statement.next()?;
+            statement.reset()?;
+        }
+        connection.execute("COMMIT")?;
+        log::info!("Stored to razpolozljive_zaloge table: {}", rows.len());
         Ok(())
     }
 
@@ -542,6 +586,7 @@ impl DBManager {
                 d.trenutna_zaloga_zadostuje_za_mesecev,
                 d.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev,
                 COALESCE(dob.dobavitelji_list, ' ') AS dobavitelji,
+                razp_zal.razpolozljiva_zaloga,
                 min_z.minimalna_zaloga,
                 max_z.maximalna_zaloga,
                 blag_s.blagovna_skupina,
@@ -556,6 +601,7 @@ impl DBManager {
                 LTRIM(GROUP_CONCAT(dobavitelj, ', '), ', ') AS dobavitelji_list
                 FROM dobavitelji GROUP BY material
             ) dob ON s.material = dob.material
+            LEFT JOIN razpolozljive_zaloge razp_zal ON s.material = razp_zal.material
             LEFT JOIN minimalne_zaloge min_z ON s.material = min_z.material
             LEFT JOIN maximalne_zaloge max_z ON s.material = max_z.material
             LEFT JOIN blagovne_skupine blag_s ON s.material = blag_s.material
@@ -656,6 +702,7 @@ pub struct ViewQuery {
     pub trenutna_zaloga_zadostuje_za_mesecev: Option<f64>,
     pub trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev: Option<f64>,
     pub dobavitelji: Option<String>,
+    pub razpolozljiva_zaloga: Option<f64>,
     pub minimalna_zaloga: Option<f64>,
     pub maximalna_zaloga: Option<f64>,
     pub blagovna_skupina: Option<String>,
@@ -687,14 +734,16 @@ impl ViewQuery {
             row.trenutna_zaloga_zadostuje_za_mesecev = statement.read(10)?;
             row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev = statement.read(11)?;
             row.dobavitelji = statement.read(12)?;
-            row.minimalna_zaloga = statement.read(13)?;
-            row.maximalna_zaloga = statement.read(14)?;
-            row.blagovna_skupina = statement.read(15)?;
-            row.pakiranje = statement.read(16)?;
-            row.opomba = statement.read(17)?;
+            row.razpolozljiva_zaloga = statement.read(13)?;
+            row.minimalna_zaloga = statement.read(14)?;
+            row.maximalna_zaloga = statement.read(15)?;
+            row.blagovna_skupina = statement.read(16)?;
+            row.pakiranje = statement.read(17)?;
+            row.opomba = statement.read(18)?;
             rows.push(row);
         }
 
+        
         Ok(rows)
     }
 }
@@ -716,6 +765,7 @@ pub enum SortColumn {
     TrenutnaZalogaZadostujeZaMesecev,
     TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev,
     Dobavitelji,
+    RazpolozljivaZaloga,
     MinimalnaZaloga,
     MaximalnaZaloga,
     BlagovnaSkupina,
@@ -739,6 +789,7 @@ impl SortColumn {
             SortColumn::TrenutnaZalogaZadostujeZaMesecev => "trenutna_zaloga_zadostuje_za_mesecev",
             SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => "trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev",
             SortColumn::Dobavitelji => "dobavitelji",
+            SortColumn::RazpolozljivaZaloga => "razpolozljiva_zaloga",
             SortColumn::MinimalnaZaloga => "minimalna_zaloga",
             SortColumn::MaximalnaZaloga => "maximalna_zaloga",
             SortColumn::BlagovnaSkupina => "blagovna_skupina",

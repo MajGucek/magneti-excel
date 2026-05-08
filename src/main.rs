@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+//#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(deprecated)] // I am not learning a whole new ecosystem
 
 mod parse;
@@ -13,7 +13,7 @@ use eframe::egui::Ui;
 use egui_extras::{Column, TableBuilder};
 use env_logger::Env;
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
-use rust_xlsxwriter::{Color, Format, Workbook};
+use rust_xlsxwriter::{Color, Format, Note, Workbook};
 use crate::db::{DBManager, SortColumn, SortState, ViewQuery};
 use crate::parse::{parse_all_files};
 
@@ -134,7 +134,7 @@ impl App {
 
             row_data: Rows {row_data},
             sort_state,
-            poraba_nabava_data: PorabaNabavaRows {material: 0, naziv: String::new(),  months: Vec::new(), poraba_nabava: Vec::new()},
+            poraba_nabava_data: PorabaNabavaRows::default(),
 
             filter_rdeca: false,
             filter_oranzna: false,
@@ -198,12 +198,12 @@ impl App {
 
 }
 
-
+#[derive(Default)]
 struct PorabaNabavaRows {
     material: i64,
     naziv: String,
     months: Vec<String>,
-    poraba_nabava: Vec<(f64, f64)>,
+    poraba_nabava: Vec<(f64, f64, f64)>,
 }
 impl PorabaNabavaRows {
     fn clear(&mut self) {
@@ -236,13 +236,13 @@ impl PorabaNabavaRows {
         ui.painter().text(
             pos2(title_rect.center().x, title_rect.center().y - 30.),
             Align2::CENTER_CENTER,
-            &format!("Poraba - {}, {}", self.material, self.naziv),
+            &format!("Poraba/Nabava/Zaloga - {}, {}", self.material, self.naziv),
             FontId::proportional(20.0),
             Color32::BLACK,
         );
 
         ui.painter().text(
-            pos2(title_rect.center().x - 50., title_rect.center().y - 0.),
+            pos2(title_rect.center().x - 125., title_rect.center().y - 0.),
             Align2::CENTER_CENTER,
             "Poraba",
             FontId::proportional(20.0),
@@ -250,33 +250,42 @@ impl PorabaNabavaRows {
         );
 
         ui.painter().text(
-            pos2(title_rect.center().x + 50., title_rect.center().y - 0.),
+            pos2(title_rect.center().x + 0., title_rect.center().y - 0.),
             Align2::CENTER_CENTER,
             "Nabava",
             FontId::proportional(20.0),
             Color32::GREEN,
         );
 
+        ui.painter().text(
+            pos2(title_rect.center().x + 125., title_rect.center().y - 0.),
+            Align2::CENTER_CENTER,
+            "Zaloga",
+            FontId::proportional(20.0),
+            Color32::BLUE,
+        );
 
-        let rect = ui.max_rect();  // Chart area (below title)
+
+        let rect = ui.max_rect();
         let padding = vec2(60.0, 40.0);
 
         let plot_rect = Rect::from_min_max(
-            pos2(rect.left(), rect.top() + 80.),  // Skip title space
+            pos2(rect.left(), rect.top() + 80.),
             pos2(rect.right(), rect.bottom()),
         );
 
         let slot_width = (plot_rect.width() - padding.x * 2.0) / self.months.len() as f32;
         let bar_width = slot_width * 0.7;
 
-        let max_value = self.poraba_nabava.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(
-            if b.0 > b.1 {b.0} else {b.1}
-        )).max(1.0);
+        let max_value = self.poraba_nabava
+            .iter()
+            .fold(f64::NEG_INFINITY, |a, &(x, y, z)| {
+                a.max(x.max(y).max(z))
+            })
+            .max(1.0);
 
-        // Background
         ui.painter().rect_filled(plot_rect, Rounding::same(0), Color32::from_gray(240));
 
-        // Grid lines
         let y_step = max_value / 10.0;
         for i in 0..=10 {
             let y_value = (i as f64) * y_step;
@@ -300,7 +309,6 @@ impl PorabaNabavaRows {
             );
         }
 
-        // Vertical grid
         for i in (0..self.months.len()).step_by(3) {
             let x = plot_rect.left() + padding.x + (i as f32) * slot_width;
             ui.painter().line_segment(
@@ -312,7 +320,7 @@ impl PorabaNabavaRows {
             );
         }
 
-        for (i, ((poraba, nabava), month)) in self.poraba_nabava.iter().zip(&self.months).enumerate() {
+        for (i, ((poraba, nabava, zaloga), month)) in self.poraba_nabava.iter().zip(&self.months).enumerate() {
             let x = plot_rect.left() + padding.x + (i as f32) * slot_width + (slot_width - bar_width) / 2.0;
 
 
@@ -328,25 +336,31 @@ impl PorabaNabavaRows {
                 pos2(x + bar_width, plot_rect.bottom() - padding.y),
             );
 
+            let zaloga_bar_height = (zaloga / max_value * (plot_rect.height() - padding.y * 2.0) as f64) as f32;
+            let zaloga_thickness = 1./5.;
+            let bar_center = x + bar_width / 2.0;
+            let zaloga_width = bar_width * zaloga_thickness;
+            let zaloga_bar_rect = Rect::from_min_max(
+                pos2(bar_center - zaloga_width / 2.0, plot_rect.bottom() - padding.y - zaloga_bar_height, ),
+                pos2(bar_center + zaloga_width / 2.0, plot_rect.bottom() - padding.y, ),
+            );
+
             let green = Color32::from_rgba_unmultiplied(0, 255, 0, 120);
             let dark_green = Color32::from_rgba_unmultiplied(0, 100, 0, 180);
 
             let red = Color32::from_rgba_unmultiplied(255, 0, 0, 120);
             let light_red = Color32::from_rgba_unmultiplied(255, 100, 100, 120);
 
-            let (first, second) = if poraba_bar_height > nabava_bar_height {
-                (
-                    (poraba_bar_rect, light_red, red),
-                    (nabava_bar_rect, green, dark_green),
-                )
-            } else {
-                (
-                    (nabava_bar_rect, green, dark_green),
-                    (poraba_bar_rect, light_red, red),
-                )
-            };
+            let blue = Color32::from_rgba_unmultiplied(0, 0, 255, 120);
+            let light_blue = Color32::from_rgba_unmultiplied(100, 100, 255, 120);
 
-            for (rect, fill, stroke_color) in [first, second] {
+            let bars = [
+                (poraba_bar_rect, light_red, red),
+                (nabava_bar_rect, green, dark_green),
+                (zaloga_bar_rect, light_blue, blue),
+            ];
+
+            for (rect, fill, stroke_color) in bars {
                 ui.painter().rect(
                     rect,
                     0.0,
@@ -370,7 +384,7 @@ impl PorabaNabavaRows {
         ui.interact(rect, ui.id(), Sense::click()).clicked()
     }
 
-    fn query(&mut self, material: i64, naziv: &str,  db_manager: &DBManager) {
+    fn query(&mut self, material: i64, naziv: &str, zaloga_sum: f64,  db_manager: &DBManager) {
         let raw_poraba_data: Vec<(String, f64)> = match db_manager.get_poraba(material) {
             Ok(rows) => {
                 let mut data = Vec::new();
@@ -445,11 +459,11 @@ impl PorabaNabavaRows {
         let today_month = Utc::now().month();
 
         let mut months = Vec::new();
-        let mut poraba_nabava = Vec::new();
+        let mut poraba_nabava: Vec<(f64, f64, f64)> = Vec::new();
 
         let first = month_data[0].clone();
         months.push(first.1.clone());
-        poraba_nabava.push(first.2);
+        poraba_nabava.push((first.2.0, first.2.1, 0.));
         let mut prev_year = first.0 .0;
         let mut prev_month = first.0 .1;
 
@@ -463,7 +477,7 @@ impl PorabaNabavaRows {
 
             while current_year < *year || (current_year == *year && current_month < *month) {
                 months.push(format!("{:04}-{:02}", current_year, current_month));
-                poraba_nabava.push((0.0, 0.0));
+                poraba_nabava.push((0.0, 0.0, 0.));
                 current_month += 1;
                 if current_month > 12 {
                     current_month = 1;
@@ -472,7 +486,7 @@ impl PorabaNabavaRows {
             }
 
             months.push(month_str.clone());
-            poraba_nabava.push(*value);
+            poraba_nabava.push((value.0, value.1, 0.));
             prev_year = *year;
             prev_month = *month;
         }
@@ -482,7 +496,7 @@ impl PorabaNabavaRows {
         let mut current_year = prev_year;
         while current_year < today_year || (current_year == today_year && current_month <= today_month) {
             months.push(format!("{:04}-{:02}", current_year, current_month));
-            poraba_nabava.push((0.0, 0.0));
+            poraba_nabava.push((0.0, 0.0, 0.));
             current_month += 1;
             if current_month > 12 {
                 current_month = 1;
@@ -490,12 +504,19 @@ impl PorabaNabavaRows {
             }
         }
 
+        let n = poraba_nabava.len();
+        assert!(n > 0);
+        poraba_nabava[n - 1].2 = zaloga_sum + poraba_nabava[n - 1].0 - poraba_nabava[n - 1].1;
+        for i in 1..n {
+            poraba_nabava[n - 1 - i].2 = poraba_nabava[n - i].2 + poraba_nabava[n - i].0 - poraba_nabava[n - i].1;
+        }
+
+
 
         self.material = material;
         self.naziv = naziv.to_string();
         self.months = months;
         self.poraba_nabava = poraba_nabava;
-
     }
 }
 
@@ -661,6 +682,8 @@ impl App {
                     body.rows(25., data.len(), |mut table_row| {
                         let index = table_row.index().clone();
 
+
+
                         let row = &data[index];
                         let colors = calculate_colors(row);
                         let mut row_color = colors.last().cloned().unwrap_or(Color32::TRANSPARENT);
@@ -672,7 +695,7 @@ impl App {
                                 .on_hover_cursor(CursorIcon::PointingHand)
                                 .clicked() {
 
-                                self.poraba_nabava_data.query(row.material, row.naziv_materiala.as_ref().unwrap_or(&"".to_string()).as_str(),  &self.db_manager);
+                                self.poraba_nabava_data.query(row.material, row.naziv_materiala.as_ref().unwrap_or(&"".to_string()).as_str(), row.zaloga.unwrap_or(0.),  &self.db_manager);
                             }
                         });
 
@@ -1006,13 +1029,18 @@ impl App {
                             ui.label(&t);
                         });
 
-                        /*
-                        table_row.col(|ui| {
-                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                            ui.label(row.mrp_karakteristika.clone().unwrap_or_else(|| "".to_string()));
-                        });
-
-                         */
+                        if table_row.response().hovered() {
+                            table_row.response().ctx.layer_painter(LayerId::new(
+                                Order::Foreground,
+                                Id::new("hover"),
+                            ))
+                                .rect_stroke(
+                                    table_row.response().rect,
+                                    CornerRadius::same(0),
+                                    Stroke::new(3.5, Color32::BLACK),
+                                    StrokeKind::Outside
+                                );
+                        }
 
                     });
                 });
@@ -1421,17 +1449,30 @@ pub fn export_filtered_to_excel(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
+    worksheet.set_default_note_author("Magneti Excel");
 
     worksheet.write_string(0, 0, "Material")?;
     worksheet.write_string(0, 1, "Naziv")?;
     worksheet.write_string(0, 2, "Zaloga 100")?;
     worksheet.write_string(0, 3, "Zaloga Sum")?;
-    worksheet.write_string(0, 4, "Poraba, Povprečna mesečna poraba za zadnje 3 mesece")?;
-    worksheet.write_string(0, 5, "Poraba, Povprečna mesečna poraba za zadnjih 24 mesecev")?;
-    worksheet.write_string(0, 6, "Odprto, Odprta naročila dobaviteljem")?;
-    worksheet.write_string(0, 7, "Dobava, Predviden dobavni rok v mesecih")?;
-    worksheet.write_string(0, 8, "Zaloga SAP, Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe")?;
-    worksheet.write_string(0, 9, "Zaloga Sum SAP, Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe")?;
+    worksheet.write_string(0, 4, "Poraba 3M")?;
+    worksheet.insert_note(0, 4, &Note::new("Povprečna mesečna poraba za zadnje 3 mesece"))?;
+
+    worksheet.write_string(0, 5, "Poraba 24M")?;
+    worksheet.insert_note(0, 5, &Note::new("Povprečna mesečna poraba za zadnjih 24 mesecev"))?;
+
+    worksheet.write_string(0, 6, "Odprto")?;
+    worksheet.insert_note(0, 6, &Note::new("Odprta naročila dobaviteljem"))?;
+
+    worksheet.write_string(0, 7, "Dobava")?;
+    worksheet.insert_note(0, 7, &Note::new("Predviden dobavni rok v mesecih"))?;
+
+    worksheet.write_string(0, 8, "Zaloga SAP")?;
+    worksheet.insert_note(0, 8, &Note::new("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"))?;
+
+    worksheet.write_string(0, 9, "Zaloga Sum SAP")?;
+    worksheet.insert_note(0, 9, &Note::new("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"))?;
+
     worksheet.write_string(0, 10, "Enota")?;
     worksheet.write_string(0, 11, "Minimalna Zaloga")?;
     worksheet.write_string(0, 12, "Maximalna Zaloga")?;
@@ -1441,6 +1482,10 @@ pub fn export_filtered_to_excel(
     worksheet.write_string(0, 16, "Nabavnik")?;
     worksheet.write_string(0, 17, "Dobavitelji")?;
 
+    fn round_f64(value: f64, precision: u32) -> f64 {
+        let factor = 10_f64.powi(precision as i32);
+        (value * factor).round() / factor
+    }
 
     for (row_idx, item) in data.iter().enumerate() {
         let row = (row_idx + 1) as u32;
@@ -1448,21 +1493,23 @@ pub fn export_filtered_to_excel(
         let format = Format::new().set_background_color(Color::RGB(
             ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
         ));
+        
+
 
         let empty = String::new();
         worksheet.write_number_with_format(row, 0, item.material as f64, &format)?;
         worksheet.write_string_with_format(row, 1, item.naziv_materiala.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_number_with_format(row, 2, item.razpolozljiva_zaloga.unwrap_or(0.), &format)?;
-        worksheet.write_number_with_format(row, 3, item.zaloga.unwrap_or(0.), &format)?;
-        worksheet.write_number_with_format(row, 4, item.poraba_3m.unwrap_or(0.), &format)?;
-        worksheet.write_number_with_format(row, 5, item.poraba_24m.unwrap_or(0.), &format)?;
-        worksheet.write_number_with_format(row, 6, item.odprta_narocila.unwrap_or(0.), &format)?;
-        worksheet.write_number_with_format(row, 7, item.dobavni_rok.unwrap_or(0.), &format)?;
-        worksheet.write_number_with_format(row, 8, item.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.), &format)?;
-        worksheet.write_number_with_format(row, 9, item.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.), &format)?;
+        worksheet.write_number_with_format(row, 2, round_f64(item.razpolozljiva_zaloga.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 3, round_f64(item.zaloga.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 4, round_f64(item.poraba_3m.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 5, round_f64(item.poraba_24m.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 6, round_f64(item.odprta_narocila.unwrap_or(0.),0), &format)?;
+        worksheet.write_number_with_format(row, 7, round_f64(item.dobavni_rok.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 8, round_f64(item.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 9, round_f64(item.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.), 1), &format)?;
         worksheet.write_string_with_format(row, 10, item.osnovna_merska_enota.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_number_with_format(row, 11, item.minimalna_zaloga.unwrap_or(0.), &format)?;
-        worksheet.write_number_with_format(row, 12, item.maximalna_zaloga.unwrap_or(0.), &format)?;
+        worksheet.write_number_with_format(row, 11, round_f64(item.minimalna_zaloga.unwrap_or(0.), 0), &format)?;
+        worksheet.write_number_with_format(row, 12, round_f64(item.maximalna_zaloga.unwrap_or(0.), 0), &format)?;
         worksheet.write_string_with_format(row, 13, item.pakiranje.as_ref().unwrap_or(&empty), &format)?;
         worksheet.write_string_with_format(row, 14, item.blagovna_skupina.as_ref().unwrap_or(&empty), &format)?;
         worksheet.write_string_with_format(row, 15, item.opomba.as_ref().unwrap_or(&empty), &format)?;

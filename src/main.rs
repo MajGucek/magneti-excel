@@ -1,4 +1,4 @@
-//#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(deprecated)] // I am not learning a whole new ecosystem
 
 mod parse;
@@ -506,7 +506,8 @@ impl PorabaNabavaRows {
 
         let n = poraba_nabava.len();
         assert!(n > 0);
-        poraba_nabava[n - 1].2 = zaloga_sum + poraba_nabava[n - 1].0 - poraba_nabava[n - 1].1;
+        poraba_nabava[n - 1].2 = zaloga_sum;
+
         for i in 1..n {
             poraba_nabava[n - 1 - i].2 = poraba_nabava[n - i].2 + poraba_nabava[n - i].0 - poraba_nabava[n - i].1;
         }
@@ -1493,7 +1494,7 @@ pub fn export_filtered_to_excel(
         let format = Format::new().set_background_color(Color::RGB(
             ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
         ));
-        
+
 
 
         let empty = String::new();
@@ -1532,6 +1533,10 @@ fn parse_string_to_optional_f64(s: &str) -> Option<f64> {
 }
 
 fn main() {
+
+
+
+
     let debug = true;
 
     let level = if debug { "info" } else { "warn" };

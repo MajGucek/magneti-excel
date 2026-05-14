@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsString};
+use std::ops::Neg;
 use std::path::PathBuf;
 use calamine::{open_workbook_auto, DataType, Reader};
 use chrono::{Local, Months, NaiveDate};
@@ -168,7 +169,7 @@ pub fn parse_poraba_file(file: PathBuf) -> Result<Vec<PorabaData>, Box<dyn std::
         
         let poraba = row.get(9)
             .and_then(DataType::get_float)
-            .map(|f| f.abs())
+            .map(|f| f.neg())
             .unwrap_or(0.);
 
         poraba_rows.push(PorabaData {
@@ -220,7 +221,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
 
         let klc_v_em_vnosa = row.get(9)
             .and_then(DataType::get_float)
-            .map(|f| f)
+            .map(|f| f.neg())
             .unwrap_or(0.);
 
         let entry = poraba_map
@@ -297,7 +298,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
             .map(|vec| {
                 vec.iter()
                     .filter(|(_, date)| is_within_last_months(&date, 3))
-                    .map(|(val, _)| val.abs())
+                    .map(|(val, _)| val)
                     .sum::<f64>() / 3.
             }).unwrap_or(0.);
 
@@ -305,7 +306,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
             .map(|vec| {
                 vec.iter()
                     .filter(|(_, date)| is_within_last_months(&date, 24))
-                    .map(|(val, _)| val.abs())
+                    .map(|(val, _)| val)
                     .sum::<f64>() / 24.
             }).unwrap_or(0.);
 

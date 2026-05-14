@@ -81,16 +81,6 @@ impl DBManager {
         Ok(())
     }
 
-    pub fn drop_non_permanent(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.drop_sifrant()?;
-        self.drop_data()?;
-        self.drop_dobavitelji()?;
-        self.drop_razpolozljive_zaloge()?;
-        self.drop_porabe()?;
-        self.drop_nabave()?;
-
-        Ok(())
-    }
 
     pub fn drop_sifrant(&self) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;

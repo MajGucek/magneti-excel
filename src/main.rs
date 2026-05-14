@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+//#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(deprecated)] // I am not learning a whole new ecosystem
 
 mod parse;
@@ -275,7 +275,7 @@ impl PorabaNabavaRows {
         );
 
         let slot_width = (plot_rect.width() - padding.x * 2.0) / self.months.len() as f32;
-        let bar_width = slot_width * 0.7;
+        let bar_width = slot_width * 0.75;
 
         let max_value = self.poraba_nabava
             .iter()
@@ -325,40 +325,50 @@ impl PorabaNabavaRows {
 
 
             let poraba_bar_height = (poraba / max_value * (plot_rect.height() - padding.y * 2.0) as f64) as f32;
+            let poraba_thickness = 1./5.;
+            let bar_center = x + bar_width / 3.0;
+            let poraba_width = bar_width * poraba_thickness;
             let poraba_bar_rect = Rect::from_min_max(
-                pos2(x, plot_rect.bottom() - padding.y - poraba_bar_height),
-                pos2(x + bar_width, plot_rect.bottom() - padding.y),
+                pos2(bar_center - poraba_width / 2.0, plot_rect.bottom() - padding.y - poraba_bar_height, ),
+                pos2(bar_center + poraba_width / 2.0, plot_rect.bottom() - padding.y, ),
             );
 
+
             let nabava_bar_height = (nabava / max_value * (plot_rect.height() - padding.y * 2.0) as f64) as f32;
+            let nabava_thickness = 1./5.;
+            let bar_center = x + bar_width * (2.0 / 3.0);
+            let nabava_width = bar_width * nabava_thickness;
             let nabava_bar_rect = Rect::from_min_max(
-                pos2(x, plot_rect.bottom() - padding.y - nabava_bar_height),
-                pos2(x + bar_width, plot_rect.bottom() - padding.y),
+                pos2(bar_center - nabava_width / 2.0, plot_rect.bottom() - padding.y - nabava_bar_height, ),
+                pos2(bar_center + nabava_width / 2.0, plot_rect.bottom() - padding.y, ),
             );
 
             let zaloga_bar_height = (zaloga / max_value * (plot_rect.height() - padding.y * 2.0) as f64) as f32;
             let zaloga_thickness = 1./5.;
-            let bar_center = x + bar_width / 2.0;
+            let bar_center = x + bar_width * 1.;
             let zaloga_width = bar_width * zaloga_thickness;
             let zaloga_bar_rect = Rect::from_min_max(
                 pos2(bar_center - zaloga_width / 2.0, plot_rect.bottom() - padding.y - zaloga_bar_height, ),
                 pos2(bar_center + zaloga_width / 2.0, plot_rect.bottom() - padding.y, ),
             );
 
-            let green = Color32::from_rgba_unmultiplied(0, 255, 0, 120);
-            let dark_green = Color32::from_rgba_unmultiplied(0, 100, 0, 180);
+            let green = Color32::from_rgb(0, 255, 0);
+            let dark_green = Color32::from_rgb(0, 100, 0);
 
-            let red = Color32::from_rgba_unmultiplied(255, 0, 0, 120);
-            let light_red = Color32::from_rgba_unmultiplied(255, 100, 100, 120);
+            let red = Color32::from_rgb(255, 0, 0);
+            let light_red = Color32::from_rgb(255, 100, 100);
 
-            let blue = Color32::from_rgba_unmultiplied(0, 0, 255, 120);
-            let light_blue = Color32::from_rgba_unmultiplied(100, 100, 255, 120);
+            let blue = Color32::from_rgb(0, 0, 255);
+            let light_blue = Color32::from_rgb(100, 100, 255);
 
-            let bars = [
+            let mut bars = [
                 (poraba_bar_rect, light_red, red),
                 (nabava_bar_rect, green, dark_green),
                 (zaloga_bar_rect, light_blue, blue),
             ];
+            bars.sort_by_key(|(rect, _, _)| {
+                -(rect.height() as i32)
+            });
 
             for (rect, fill, stroke_color) in bars {
                 ui.painter().rect(
@@ -1377,10 +1387,6 @@ impl eframe::App for App {
                        .set_directory(dir)
                        .pick_files();
                    if files.is_some() {
-                       match self.db_manager.drop_non_permanent() {
-                           Err(e) => log::error!("dropping error: {}", e),
-                           Ok(_) => log::info!("Successfully dropped data")
-                       }
                        let res = parse_all_files(files.unwrap(), &self.db_manager);
                        ui.ctx().request_repaint();
                        self.row_data.query(&self.db_manager, &self.sort_state);

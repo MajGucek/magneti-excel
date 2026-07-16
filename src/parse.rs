@@ -408,6 +408,8 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
 pub struct DobaviteljRow {
     pub material: i64,
     pub dobavitelj: String,
+    pub cena: f64,
+    pub valuta: String,
 }
 pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<dyn std::error::Error>> {
     if !path.file_name().unwrap_or(OsString::default().as_os_str()).eq("DOBAVITELJI.XLSX") {
@@ -417,6 +419,7 @@ pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<d
     let mut workbook = open_workbook_auto(path)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
     let mut dobavitelji_map: HashMap<i64, Vec<String>> = HashMap::new();
+    let mut cena_map: HashMap<i64, (f64, String)> = HashMap::new();
     log::info!("Started parsing dobavitelji");
     for row in range.rows().skip(1) {
         let material = row.get(0)
@@ -428,6 +431,22 @@ pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<d
         let dobavitelj = row.get(7)
             .and_then(DataType::get_string)
             .unwrap_or("").to_string();
+
+        let neto_cena = row.get(18)
+            .and_then(DataType::get_float)
+            .unwrap_or(0.);
+        let enota_cene = row.get(20)
+            .and_then(DataType::get_float)
+            .unwrap_or(0.);
+        let cena = if enota_cene != 0. { neto_cena / enota_cene } else { log::warn!("Enota cene == 0.!"); 0. };
+        let valuta = row.get(19)
+            .and_then(DataType::get_string)
+            .unwrap_or(String::new().as_str()).to_string();
+
+        if !cena_map.contains_key(&material) && cena != 0. {
+            cena_map.insert(material, (cena, valuta));
+        }
+
 
         let mut dont_add = false;
 
@@ -442,10 +461,18 @@ pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<d
         }
     }
 
-    dobavitelji_map.into_iter().for_each(|(material, dobavitelji)| {
+    let key_set: HashSet<i64> = dobavitelji_map.keys()
+        .chain(cena_map.keys())
+        .copied().collect();
+
+    key_set.into_iter().for_each(|material| {
+        let em = (0., String::new());
+        let cena_element = cena_map.get(&material).unwrap_or(&em);
         row_data.push(DobaviteljRow {
-            material,
-            dobavitelj: dobavitelji.join(", "),
+           material,
+            dobavitelj: dobavitelji_map.get(&material).unwrap_or(&Vec::new()).join(", "),
+            cena: cena_element.0,
+            valuta: cena_element.1.clone(),
         });
     });
 
@@ -459,6 +486,7 @@ pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<d
 pub struct RazpolozljivaZalogaRow {
     pub material: i64,
     pub razpolozljiva_zaloga: f64,
+    pub lokacija: String,
 }
 pub fn parse_razpolozljiva_zaloga_file(path: PathBuf) -> Result<Vec<RazpolozljivaZalogaRow>, Box<dyn std::error::Error>> {
     if !path.file_name().unwrap_or(OsString::default().as_os_str()).eq("ZALOGA100.XLSX") {
@@ -467,7 +495,7 @@ pub fn parse_razpolozljiva_zaloga_file(path: PathBuf) -> Result<Vec<Razpolozljiv
     let mut row_data = Vec::new();
     let mut workbook = open_workbook_auto(path)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
-    let mut zaloga_100_map: HashMap<i64, f64> = HashMap::new();
+    let mut zaloga_100_map: HashMap<i64, (String, f64)> = HashMap::new();
     log::info!("Started parsing zaloga100");
     for row in range.rows().skip(1) {
         let material = row.get(0)
@@ -480,18 +508,24 @@ pub fn parse_razpolozljiva_zaloga_file(path: PathBuf) -> Result<Vec<Razpolozljiv
             .and_then(DataType::get_float)
             .unwrap_or(0.);
 
+        let lokacija = row.get(9)
+            .and_then(DataType::get_string)
+            .unwrap_or(String::new().as_str()).to_string();
+
 
         let entry = zaloga_100_map
             .entry(material)
-            .or_insert(0.);
-        *entry += razpolozljiva_zaloga;
+            .or_insert((String::new(), 0.));
+        (*entry).1 += razpolozljiva_zaloga;
+        (*entry).0 = lokacija;
 
     }
 
-    zaloga_100_map.into_iter().for_each(|(material, razpolozljiva_zaloga)| {
+    zaloga_100_map.into_iter().for_each(|(material, (lokacija, razpolozljiva_zaloga))| {
        row_data.push(RazpolozljivaZalogaRow {
            material,
            razpolozljiva_zaloga,
+           lokacija,
        })
     });
 

@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+//#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(deprecated)] // I am not learning a whole new ecosystem
 
 mod parse;
@@ -13,7 +13,7 @@ use eframe::egui::Ui;
 use egui_extras::{Column, TableBuilder};
 use env_logger::Env;
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
-use rust_xlsxwriter::{Color, Format, Note, Workbook};
+use rust_xlsxwriter::{Format, Note, Workbook};
 use crate::db::{DBManager, SortColumn, SortState, ViewQuery};
 use crate::parse::{parse_all_files};
 
@@ -576,9 +576,9 @@ impl App {
                     let has_open_orders = row.odprta_narocila.is_some_and(|v| v != 0.);
                     let no_3m_no_24m = !(row.poraba_3m.is_some_and(|v| v == 0.) && row.poraba_24m.is_some_and(|v| v == 0.));
 
-                    color_matches |= self.filter_rumena && row.dobavni_rok.is_some() && months_left >= 1.0 && months_left < 1.5 && no_open_orders && no_3m_no_24m;
-                    color_matches |= self.filter_oranzna && row.dobavni_rok.is_some() && months_left >= 0.3 && months_left < 1.0 && no_open_orders && no_3m_no_24m;
-                    color_matches |= self.filter_rdeca && row.dobavni_rok.is_some() && months_left < 0.3 && no_open_orders && row.dobavni_rok.unwrap_or(0.) < 90. && no_3m_no_24m;
+                    color_matches |= row.trenutna_zaloga_zadostuje_za_mesecev.is_some() && self.filter_rumena && row.dobavni_rok.is_some() && months_left >= 1.0 && months_left < 1.5 && no_open_orders && no_3m_no_24m;
+                    color_matches |= row.trenutna_zaloga_zadostuje_za_mesecev.is_some() && self.filter_oranzna && row.dobavni_rok.is_some() && months_left >= 0.3 && months_left < 1.0 && no_open_orders && no_3m_no_24m;
+                    color_matches |= row.trenutna_zaloga_zadostuje_za_mesecev.is_some() && self.filter_rdeca && row.dobavni_rok.is_some() && months_left < 0.3 && no_open_orders && row.dobavni_rok.unwrap_or(0.) < 90. && no_3m_no_24m;
 
                     color_matches |= self.filter_viola && row.dobavni_rok.is_some() && row.dobavni_rok.unwrap_or(0.) >= 90. &&
                         no_open_orders;
@@ -656,10 +656,14 @@ impl App {
                 .columns(Column::exact(90.), 1)// Dobava
                 .columns(Column::exact(110.), 1)// Zaloga SAP
                 .columns(Column::exact(160.), 1)// Zaloga Sum SAP
+                .columns(Column::exact(120.), 1)// Cena
+                .columns(Column::exact(120.), 1)// Valuta
                 .columns(Column::exact(120.), 1)// Enota
                 .columns(Column::exact(120.), 1)// Minimalna zaloga
                 .columns(Column::exact(120.), 1)// Maximalna zaloga
                 .columns(Column::exact(120.), 1)// Pakiranje
+                .columns(Column::exact(120.), 1)// Lokacija
+                .columns(Column::exact(120.), 1)// MRP
                 .columns(Column::exact(160.), 1)// Blagovna Skupina
                 .columns(Column::exact(300.), 1)// Opomba
                 .columns(Column::exact(110.), 1)// Nabavnik
@@ -679,15 +683,18 @@ impl App {
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaZadostujeZaMesecev, "Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
 
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Zaloga Sum SAP").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Cena, "Cena"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Valuta, "Valuta"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::OsnovnaMerskaEnota, "Enota"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::MinimalnaZaloga, "Min zaloga"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::MaximalnaZaloga, "Max zaloga"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Pakiranje, "Pakiranje"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Lokacija, "Lokacija"); });
+                    header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::MRP, "MRP"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::BlagovnaSkupina, "Blagovna Skupina"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Opomba, "Opomba"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::NabavnaSkupina, "Nabavnik").on_hover_text("002 Neli\n008 Viktoriia\n010 Boštjan"); });
                     header.col(|ui| {ui.radio_value(&mut self.sort_state.sort_column, SortColumn::Dobavitelji, "Dobavitelji"); });
-                    //header.col(|ui| {ui.heading("MRP"); });
                 })
                 .body(|body| {
                     body.rows(25., data.len(), |mut table_row| {
@@ -799,8 +806,14 @@ impl App {
                         });
 
                         table_row.col(|ui| {
+                            let old = row_color;
+                            if row.odprta_narocila.is_some_and(|o| o != 0.) &&
+                            row.trenutna_zaloga_zadostuje_za_mesecev.is_some_and(|val| val < row.dobavni_rok.unwrap_or(0.)) {
+                                row_color = RED;
+                            }
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
                             ui.label(row.trenutna_zaloga_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v, 1)));
+                            row_color = old;
                         });
 
                         table_row.col(|ui| {
@@ -808,6 +821,16 @@ impl App {
                             ui.label(row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v, 1)));
                         });
 
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            ui.label(row.cena.map_or("".to_string(), |v| format_number_custom(v, 1)));
+                        });
+
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            let t = row.valuta.clone().unwrap_or_else(|| "".to_string());
+                            ui.label(&t);
+                        });
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
@@ -948,6 +971,19 @@ impl App {
 
                         table_row.col(|ui| {
                             ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            let t = row.lokacija.clone().unwrap_or_else(|| "".to_string());
+                            ui.label(&t);
+                        });
+
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                            let t = row.mrp_karakteristika.clone().unwrap_or_else(|| "".to_string());
+                            ui.label(&t);
+                        });
+
+
+                        table_row.col(|ui| {
+                            ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
 
                             if self.editing_blagovna_skupina_row == Some(index) {
                                 let response = ui.text_edit_singleline(&mut self.edit_blagovna_skupina_input);
@@ -1073,7 +1109,7 @@ fn calculate_colors(row: &ViewQuery) -> Vec<Color32> {
             }
         }
 
-        if row.odprta_narocila.is_some_and(|v| v == 0.) {
+        if row.odprta_narocila.is_some_and(|v| v == 0.) && row.trenutna_zaloga_zadostuje_za_mesecev.is_some() {
             if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 1.5 {
                 colors.push(YELLOW);
             }
@@ -1085,7 +1121,9 @@ fn calculate_colors(row: &ViewQuery) -> Vec<Color32> {
             if row.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.) - row.dobavni_rok.unwrap_or(0.) < 0.3 {
                 colors.push(RED);
             }
+        }
 
+        if row.odprta_narocila.is_some_and(|v| v == 0.) {
             if row.dobavni_rok.unwrap_or(0.) >= 90. {
                 colors.push(VIOLET);
             }
@@ -1389,6 +1427,7 @@ impl eframe::App for App {
                    if files.is_some() {
                        let res = parse_all_files(files.unwrap(), &self.db_manager);
                        ui.ctx().request_repaint();
+                       log::info!("after request paint, after import!");
                        self.row_data.query(&self.db_manager, &self.sort_state);
                        match res {
                            Ok(_) => {
@@ -1496,10 +1535,14 @@ pub fn export_filtered_to_excel(
 
     for (row_idx, item) in data.iter().enumerate() {
         let row = (row_idx + 1) as u32;
+        /*
         let [r, g, b, _a] = calculate_colors(item).last().map(|&c| if c == Color32::TRANSPARENT {Color32::WHITE} else {c}).unwrap_or(Color32::WHITE).to_array();
         let format = Format::new().set_background_color(Color::RGB(
             ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
         ));
+         */
+
+        let format = Format::default();
 
 
 

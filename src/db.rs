@@ -55,9 +55,9 @@ impl DBManager {
                 trenutna_zaloga_zadostuje_za_mesecev REAL
                     GENERATED ALWAYS AS (
                         CASE
-                            WHEN poraba_3m = 0 OR poraba_3m IS NULL THEN
+                            WHEN poraba_3m <= 0 OR poraba_3m IS NULL THEN
                             CASE
-                                WHEN poraba_24m = 0 OR poraba_24m IS NULL THEN NULL
+                                WHEN poraba_24m <= 0 OR poraba_24m IS NULL THEN NULL
                                 ELSE zaloga / poraba_24m
                             END
                             ELSE zaloga / poraba_3m
@@ -66,9 +66,9 @@ impl DBManager {
                 trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev REAL
                     GENERATED ALWAYS AS (
                         CASE
-                            WHEN poraba_3m = 0 OR poraba_3m IS NULL THEN
+                            WHEN poraba_3m <= 0 OR poraba_3m IS NULL THEN
                             CASE
-                                WHEN poraba_24m = 0 OR poraba_24m IS NULL THEN NULL
+                                WHEN poraba_24m <= 0 OR poraba_24m IS NULL THEN NULL
                                 ELSE (zaloga + odprta_narocila) / poraba_24m
                             END
                             ELSE (zaloga + odprta_narocila) / poraba_3m
@@ -251,7 +251,8 @@ impl DBManager {
             CREATE TABLE IF NOT EXISTS razpolozljive_zaloge (
                 id INTEGER PRIMARY KEY,
                 material INTEGER NOT NULL,
-                razpolozljiva_zaloga REAL
+                razpolozljiva_zaloga REAL,
+                lokacija TEXT
             );
         ")?;
         connection.execute("COMMIT")?;
@@ -265,7 +266,7 @@ impl DBManager {
         self.create_razpolozljive_zaloge_table(&connection)?;
 
         let mut statement = connection.prepare("
-            INSERT INTO razpolozljive_zaloge (material, razpolozljiva_zaloga) VALUES (?, ?)
+            INSERT INTO razpolozljive_zaloge (material, razpolozljiva_zaloga, lokacija) VALUES (?, ?, ?)
         ")?;
 
         connection.execute("BEGIN TRANSACTION")?;
@@ -273,6 +274,7 @@ impl DBManager {
         for razpolozljiva_zaloga_row in rows.iter() {
             statement.bind((1, razpolozljiva_zaloga_row.material))?;
             statement.bind((2, razpolozljiva_zaloga_row.razpolozljiva_zaloga))?;
+            statement.bind((3, razpolozljiva_zaloga_row.lokacija.as_str()))?;
             statement.next()?;
             statement.reset()?;
         }
@@ -287,7 +289,9 @@ impl DBManager {
             CREATE TABLE IF NOT EXISTS dobavitelji (
                 id INTEGER PRIMARY KEY,
                 material INTEGER NOT NULL,
-                dobavitelj TEXT
+                dobavitelj TEXT,
+                cena REAL,
+                valuta TEXT
             );
         ")?;
         connection.execute("COMMIT")?;
@@ -301,7 +305,7 @@ impl DBManager {
         self.create_dobavitelji_table(&connection)?;
 
         let mut statement = connection.prepare("
-            INSERT INTO dobavitelji (material, dobavitelj) VALUES (?, ?)
+            INSERT INTO dobavitelji (material, dobavitelj, cena, valuta) VALUES (?, ?, ?, ?)
         ")?;
 
         connection.execute("BEGIN TRANSACTION")?;
@@ -309,6 +313,8 @@ impl DBManager {
         for dobavitelj_row in rows.iter() {
             statement.bind((1, dobavitelj_row.material))?;
             statement.bind(&[(2, dobavitelj_row.dobavitelj.as_str())][..])?;
+            statement.bind((3, dobavitelj_row.cena))?;
+            statement.bind(&[(4, dobavitelj_row.valuta.as_str())][..])?;
             statement.next()?;
             statement.reset()?;
         }
@@ -576,7 +582,10 @@ impl DBManager {
                 d.trenutna_zaloga_zadostuje_za_mesecev,
                 d.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev,
                 COALESCE(dob.dobavitelji_list, ' ') AS dobavitelji,
+                dob.cena,
+                dob.valuta,
                 razp_zal.razpolozljiva_zaloga,
+                razp_zal.lokacija,
                 min_z.minimalna_zaloga,
                 max_z.maximalna_zaloga,
                 blag_s.blagovna_skupina,
@@ -588,7 +597,9 @@ impl DBManager {
             LEFT JOIN opombe o ON s.material = o.material
             LEFT JOIN (
                 SELECT material,
-                LTRIM(GROUP_CONCAT(dobavitelj, ', '), ', ') AS dobavitelji_list
+                LTRIM(GROUP_CONCAT(dobavitelj, ', '), ', ') AS dobavitelji_list,
+                cena,
+                valuta
                 FROM dobavitelji GROUP BY material
             ) dob ON s.material = dob.material
             LEFT JOIN razpolozljive_zaloge razp_zal ON s.material = razp_zal.material
@@ -692,7 +703,10 @@ pub struct ViewQuery {
     pub trenutna_zaloga_zadostuje_za_mesecev: Option<f64>,
     pub trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev: Option<f64>,
     pub dobavitelji: Option<String>,
+    pub cena: Option<f64>,
+    pub valuta: Option<String>,
     pub razpolozljiva_zaloga: Option<f64>,
+    pub lokacija: Option<String>,
     pub minimalna_zaloga: Option<f64>,
     pub maximalna_zaloga: Option<f64>,
     pub blagovna_skupina: Option<String>,
@@ -724,12 +738,15 @@ impl ViewQuery {
             row.trenutna_zaloga_zadostuje_za_mesecev = statement.read(10)?;
             row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev = statement.read(11)?;
             row.dobavitelji = statement.read(12)?;
-            row.razpolozljiva_zaloga = statement.read(13)?;
-            row.minimalna_zaloga = statement.read(14)?;
-            row.maximalna_zaloga = statement.read(15)?;
-            row.blagovna_skupina = statement.read(16)?;
-            row.pakiranje = statement.read(17)?;
-            row.opomba = statement.read(18)?;
+            row.cena = statement.read(13)?;
+            row.valuta = statement.read(14)?;
+            row.razpolozljiva_zaloga = statement.read(15)?;
+            row.lokacija = statement.read(16)?;
+            row.minimalna_zaloga = statement.read(17)?;
+            row.maximalna_zaloga = statement.read(18)?;
+            row.blagovna_skupina = statement.read(19)?;
+            row.pakiranje = statement.read(20)?;
+            row.opomba = statement.read(21)?;
             rows.push(row);
         }
 
@@ -746,7 +763,7 @@ pub enum SortColumn {
     NazivMateriala,
     OsnovnaMerskaEnota,
     NabavnaSkupina,
-    _MRP,
+    MRP,
     Zaloga,
     Poraba3M,
     Poraba24M,
@@ -755,11 +772,14 @@ pub enum SortColumn {
     TrenutnaZalogaZadostujeZaMesecev,
     TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev,
     Dobavitelji,
+    Cena,
+    Valuta,
     RazpolozljivaZaloga,
     MinimalnaZaloga,
     MaximalnaZaloga,
     BlagovnaSkupina,
     Pakiranje,
+    Lokacija,
     Opomba,
 }
 
@@ -770,7 +790,7 @@ impl SortColumn {
             SortColumn::NazivMateriala => "naziv_materiala",
             SortColumn::OsnovnaMerskaEnota => "osnovna_merska_enota",
             SortColumn::NabavnaSkupina => "nabavna_skupina",
-            SortColumn::_MRP => "mrp_karakteristika",
+            SortColumn::MRP => "mrp_karakteristika",
             SortColumn::Zaloga => "zaloga",
             SortColumn::Poraba3M => "poraba_3m",
             SortColumn::Poraba24M => "poraba_24m",
@@ -779,11 +799,14 @@ impl SortColumn {
             SortColumn::TrenutnaZalogaZadostujeZaMesecev => "trenutna_zaloga_zadostuje_za_mesecev",
             SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => "trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev",
             SortColumn::Dobavitelji => "dobavitelji",
+            SortColumn::Cena => "cena",
+            SortColumn::Valuta => "valuta",
             SortColumn::RazpolozljivaZaloga => "razpolozljiva_zaloga",
             SortColumn::MinimalnaZaloga => "minimalna_zaloga",
             SortColumn::MaximalnaZaloga => "maximalna_zaloga",
             SortColumn::BlagovnaSkupina => "blagovna_skupina",
             SortColumn::Pakiranje => "pakiranje",
+            SortColumn::Lokacija => "lokacija",
             SortColumn::Opomba => "opomba",
         }
     }

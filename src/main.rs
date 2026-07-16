@@ -1518,15 +1518,18 @@ pub fn export_filtered_to_excel(
 
     worksheet.write_string(0, 9, "Zaloga Sum SAP")?;
     worksheet.insert_note(0, 9, &Note::new("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"))?;
-
-    worksheet.write_string(0, 10, "Enota")?;
-    worksheet.write_string(0, 11, "Minimalna Zaloga")?;
-    worksheet.write_string(0, 12, "Maximalna Zaloga")?;
-    worksheet.write_string(0, 13, "Pakiranje")?;
-    worksheet.write_string(0, 14, "Blagovna Skupina")?;
-    worksheet.write_string(0, 15, "Opomba")?;
-    worksheet.write_string(0, 16, "Nabavnik")?;
-    worksheet.write_string(0, 17, "Dobavitelji")?;
+    worksheet.write_string(0, 10, "Cena")?;
+    worksheet.write_string(0, 11, "Valuta")?;
+    worksheet.write_string(0, 12, "Enota")?;
+    worksheet.write_string(0, 13, "Minimalna Zaloga")?;
+    worksheet.write_string(0, 14, "Maximalna Zaloga")?;
+    worksheet.write_string(0, 15, "Pakiranje")?;
+    worksheet.write_string(0, 16, "Lokacija")?;
+    worksheet.write_string(0, 17, "MRP")?;
+    worksheet.write_string(0, 18, "Blagovna Skupina")?;
+    worksheet.write_string(0, 19, "Opomba")?;
+    worksheet.write_string(0, 20, "Nabavnik")?;
+    worksheet.write_string(0, 21, "Dobavitelji")?;
 
     fn round_f64(value: f64, precision: u32) -> f64 {
         let factor = 10_f64.powi(precision as i32);
@@ -1557,14 +1560,18 @@ pub fn export_filtered_to_excel(
         worksheet.write_number_with_format(row, 7, round_f64(item.dobavni_rok.unwrap_or(0.), 1), &format)?;
         worksheet.write_number_with_format(row, 8, round_f64(item.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.), 1), &format)?;
         worksheet.write_number_with_format(row, 9, round_f64(item.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.), 1), &format)?;
-        worksheet.write_string_with_format(row, 10, item.osnovna_merska_enota.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_number_with_format(row, 11, round_f64(item.minimalna_zaloga.unwrap_or(0.), 0), &format)?;
-        worksheet.write_number_with_format(row, 12, round_f64(item.maximalna_zaloga.unwrap_or(0.), 0), &format)?;
-        worksheet.write_string_with_format(row, 13, item.pakiranje.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 14, item.blagovna_skupina.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 15, item.opomba.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 16, item.nabavna_skupina.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 17, item.dobavitelji.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_number_with_format(row, 10, round_f64(item.cena.unwrap_or(0.), 1), &format)?;
+        worksheet.write_string_with_format(row, 11, item.valuta.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 12, item.osnovna_merska_enota.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_number_with_format(row, 13, round_f64(item.minimalna_zaloga.unwrap_or(0.), 0), &format)?;
+        worksheet.write_number_with_format(row, 14, round_f64(item.maximalna_zaloga.unwrap_or(0.), 0), &format)?;
+        worksheet.write_string_with_format(row, 15, item.pakiranje.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 16, item.lokacija.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 17, item.mrp_karakteristika.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 18, item.blagovna_skupina.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 19, item.opomba.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 20, item.nabavna_skupina.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 21, item.dobavitelji.as_ref().unwrap_or(&empty), &format)?;
 
     }
 

@@ -1021,7 +1021,7 @@ impl ViewQueryFields {
             ViewQueryFields::Cena => {
                 table_row.col(|ui| {
                     ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                    ui.label(row.cena.map_or("".to_string(), |v| format_number_custom(v, 1)));
+                    ui.label(row.cena.map_or("".to_string(), |v| format_number_custom(v, 2)));
                 });
 
             }

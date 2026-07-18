@@ -1,0 +1,26 @@
+{
+  "display_columns": [
+    "Material",
+    "NazivMateriala",
+    "RazpolozljivaZaloga",
+    "Zaloga",
+    "Poraba3M",
+    "Poraba24M",
+    "OdprtaNarocila",
+    "DobavniRok",
+    "TrenutnaZalogaZadostujeZaMesecev",
+    "TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev",
+    "Cena",
+    "Valuta",
+    "OsnovnaMerskaEnota",
+    "MinimalnaZaloga",
+    "MaximalnaZaloga",
+    "Pakiranje",
+    "Lokacija",
+    "MRP",
+    "BlagovnaSkupina",
+    "Opomba",
+    "NabavnaSkupina",
+    "Dobavitelji"
+  ]
+}

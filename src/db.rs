@@ -1,5 +1,10 @@
 use chrono::NaiveDate;
+use eframe::egui::{Color32, CornerRadius, CursorIcon, RichText};
+use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use sqlite::{Connection, State};
+use serde::{Deserialize, Serialize};
+use crate::{format_nabavnik, format_number_custom, parse_string_to_optional_f64, Rows, INDIGO, RED, TEAL};
+use crate::graph::PorabaNabavaRows;
 use crate::parse::{DobaviteljRow, NabavaData, PorabaData, RowData, SifrantRow, RazpolozljivaZalogaRow};
 
 pub struct DBManager {
@@ -756,8 +761,8 @@ impl ViewQuery {
 }
 
 
-#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SortColumn {
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewQueryFields {
     #[default]
     Material,
     NazivMateriala,
@@ -775,52 +780,526 @@ pub enum SortColumn {
     Cena,
     Valuta,
     RazpolozljivaZaloga,
+    Lokacija,
     MinimalnaZaloga,
     MaximalnaZaloga,
     BlagovnaSkupina,
     Pakiranje,
-    Lokacija,
     Opomba,
 }
 
-impl SortColumn {
+impl std::fmt::Display for ViewQueryFields {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = format!("{self:?}");
+        let mut out = String::new();
+        for (i, c) in name.chars().enumerate() {
+            if c.is_uppercase() && i != 0 {
+                out.push(' ');
+            }
+            out.push(c);
+        }
+        write!(f, "{out}")
+    }
+}
+
+impl ViewQueryFields {
+    pub const ALL: [ViewQueryFields; 22] = [
+        ViewQueryFields::Material,
+        ViewQueryFields::NazivMateriala,
+        ViewQueryFields::OsnovnaMerskaEnota,
+        ViewQueryFields::NabavnaSkupina,
+        ViewQueryFields::MRP,
+        ViewQueryFields::Zaloga,
+        ViewQueryFields::Poraba3M,
+        ViewQueryFields::Poraba24M,
+        ViewQueryFields::OdprtaNarocila,
+        ViewQueryFields::DobavniRok,
+        ViewQueryFields::TrenutnaZalogaZadostujeZaMesecev,
+        ViewQueryFields::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev,
+        ViewQueryFields::Dobavitelji,
+        ViewQueryFields::Cena,
+        ViewQueryFields::Valuta,
+        ViewQueryFields::RazpolozljivaZaloga,
+        ViewQueryFields::Lokacija,
+        ViewQueryFields::MinimalnaZaloga,
+        ViewQueryFields::MaximalnaZaloga,
+        ViewQueryFields::BlagovnaSkupina,
+        ViewQueryFields::Pakiranje,
+        ViewQueryFields::Opomba,
+    ];
+    pub fn construct_headers(&self, header: &mut egui_extras::TableRow, sort: &mut ViewQueryFields) {
+        match self {
+            ViewQueryFields::Material => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Material, "Material"); });},
+            ViewQueryFields::NazivMateriala => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::NazivMateriala, "Naziv"); });},
+            ViewQueryFields::OsnovnaMerskaEnota => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::OsnovnaMerskaEnota, "Enota"); });},
+            ViewQueryFields::NabavnaSkupina => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::NabavnaSkupina, "Nabavnik").on_hover_text("002 Neli\n008 Viktoriia\n010 Boštjan"); });},
+            ViewQueryFields::MRP => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::MRP, "MRP"); });},
+            ViewQueryFields::Zaloga => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Zaloga, "Zaloga Sum").on_hover_text("Trenutna zaloga v SAP-u"); });},
+            ViewQueryFields::Poraba3M => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Poraba3M, "Poraba 3M").on_hover_text("Povprečna mesečna poraba za zadnje 3 mesece"); });},
+            ViewQueryFields::Poraba24M => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Poraba24M, "Poraba 24M").on_hover_text("Povprečna mesečna poraba za zadnjih 24 mesecev"); });},
+            ViewQueryFields::OdprtaNarocila => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::OdprtaNarocila, "Odprto").on_hover_text("Odprta naročila dobaviteljem"); });},
+            ViewQueryFields::DobavniRok => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::DobavniRok, "Dobava").on_hover_text("Predviden dobavni rok v mesecih"); });},
+            ViewQueryFields::TrenutnaZalogaZadostujeZaMesecev => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::TrenutnaZalogaZadostujeZaMesecev, "Zaloga SAP").on_hover_text("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });},
+            ViewQueryFields::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Zaloga Sum SAP").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });},
+            ViewQueryFields::Dobavitelji => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Dobavitelji, "Dobavitelji"); });},
+            ViewQueryFields::Cena => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Cena, "Cena"); });},
+            ViewQueryFields::Valuta => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Valuta, "Valuta"); });},
+            ViewQueryFields::RazpolozljivaZaloga => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::RazpolozljivaZaloga, "Zaloga 100"); });},
+            ViewQueryFields::MinimalnaZaloga => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::MinimalnaZaloga, "Min zaloga"); });},
+            ViewQueryFields::MaximalnaZaloga => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::MaximalnaZaloga, "Max zaloga"); });},
+            ViewQueryFields::BlagovnaSkupina => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::BlagovnaSkupina, "Blagovna skupina"); });},
+            ViewQueryFields::Pakiranje => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Pakiranje, "Pakiranje"); });},
+            ViewQueryFields::Lokacija => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Lokacija, "Lokacija"); });},
+            ViewQueryFields::Opomba => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Opomba, "Opomba"); });},
+        }
+    }
+    pub fn construct_body(&self,
+                          table_row: &mut egui_extras::TableRow,
+                          index: usize,
+                          row: &ViewQuery,
+                          mut row_color: Color32,
+                          poraba_nabava_data: &mut PorabaNabavaRows,
+                          db_manager: &DBManager,
+                          sort_state: &SortState,
+                          row_data: &mut Rows,
+                          editing_dobavni_rok_row: &mut Option<usize>,
+                          edit_dobavni_rok_input: &mut String,
+                          editing_min_zaloga_row: &mut Option<usize>,
+                          edit_min_zaloga_row_input: &mut String,
+                          editing_max_zaloga_row: &mut Option<usize>,
+                          edit_max_zaloga_row_input: &mut String,
+                          editing_pakiranje_row: &mut Option<usize>,
+                          edit_pakiranje_input: &mut String,
+                          editing_blagovna_skupina_row: &mut Option<usize>,
+                          edit_blagovna_skupina_input: &mut String,
+                          editing_opomba_row: &mut Option<usize>,
+                          edit_opomba_input: &mut String,
+    ) {
+        match self {
+            ViewQueryFields::Material => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    if ui.label(RichText::new(row.material.to_string()).underline().background_color(Color32::TRANSPARENT))
+                        .on_hover_cursor(CursorIcon::PointingHand)
+                        .clicked() {
+
+                        poraba_nabava_data.query(row.material, row.naziv_materiala.as_ref().unwrap_or(&"".to_string()).as_str(), row.zaloga.unwrap_or(0.),  &db_manager);
+                    }
+                });
+            }
+            ViewQueryFields::NazivMateriala => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    ui.label(row.naziv_materiala.clone().unwrap_or_else(|| "".to_string()));
+                });
+            }
+            ViewQueryFields::OsnovnaMerskaEnota => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    let t = row.osnovna_merska_enota.clone().unwrap_or_else(|| "".to_string());
+                    ui.label(&t);
+                });
+            }
+            ViewQueryFields::NabavnaSkupina => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    let nabavna_skupina = row.nabavna_skupina.clone().unwrap_or_else(|| "".to_string());
+
+                    ui.label(format_nabavnik(nabavna_skupina.as_str()).unwrap_or(nabavna_skupina.as_str()));
+                });
+            }
+            ViewQueryFields::MRP => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    let t = row.mrp_karakteristika.clone().unwrap_or_else(|| "".to_string());
+                    ui.label(&t);
+                });
+            }
+            ViewQueryFields::Zaloga => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    ui.label(row.zaloga.map_or("".to_string(), |v| format_number_custom(v, 1)));
+                });
+            }
+            ViewQueryFields::Poraba3M => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    let poraba_3m = row.poraba_3m.map_or("".to_string(), |v| format_number_custom(v, 1));
+                    let poraba_24m = row.poraba_24m.map_or("".to_string(), |v| format_number_custom(v, 1));
+
+                    let (arrow, color) = if poraba_3m > poraba_24m {
+                        ("🔺", Color32::BLACK)
+                    } else if !poraba_3m.eq("0,00") && !poraba_24m.eq("0,00") && !poraba_3m.eq(poraba_24m.as_str()) {
+                        ("🔻", Color32::BLACK)
+                    } else if poraba_3m.eq("0,00") && !poraba_24m.eq("0,00") {
+                        ("🔻", Color32::BLACK)
+                    } else {
+                        ("     ", Color32::TRANSPARENT)
+                    };
+
+
+                    ui.colored_label(color, arrow);
+                    ui.label(poraba_3m);
+                });
+            }
+            ViewQueryFields::Poraba24M => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    ui.label(row.poraba_24m.map_or("".to_string(), |v| format_number_custom(v, 1)));
+                });
+            }
+            ViewQueryFields::OdprtaNarocila => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    ui.label(row.odprta_narocila.map_or("".to_string(), |v| format_number_custom(v, 0)));
+                });
+            }
+            ViewQueryFields::DobavniRok => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+
+                    if *editing_dobavni_rok_row == Some(index) {
+                        let response = ui.text_edit_singleline(edit_dobavni_rok_input);
+                        if response.lost_focus() {
+                            *editing_dobavni_rok_row = None;
+
+                            let os_resp = MessageDialog::new()
+                                .set_title("Potrdi vnos")
+                                .set_level(MessageLevel::Info)
+                                .set_buttons(MessageButtons::OkCancel)
+                                .show();
+
+                            match os_resp {
+                                MessageDialogResult::Ok => {
+                                    let _ = db_manager.store_dobavni_rok((
+                                        row.material,
+                                        parse_string_to_optional_f64(edit_dobavni_rok_input.as_str()),
+                                    ));
+                                    row_data.query(db_manager, sort_state);
+                                },
+                                _ => {}
+                            }
+                        }
+
+                    } else {
+                        let label_text = row.dobavni_rok.map_or(" ".repeat(18), |v| format_number_custom(v, 1));
+                        let resp = ui.label(label_text).on_hover_cursor(CursorIcon::Help);
+                        if resp.double_clicked() {
+                            *editing_dobavni_rok_row = Some(index);
+                            *edit_dobavni_rok_input = row.dobavni_rok.map_or("".to_string(), |v| format!("{}", v));
+                        }
+
+                    }
+
+                });
+            }
+            ViewQueryFields::TrenutnaZalogaZadostujeZaMesecev => {
+                table_row.col(|ui| {
+                    let old = row_color;
+                    if row.odprta_narocila.is_some_and(|o| o != 0.) &&
+                        row.trenutna_zaloga_zadostuje_za_mesecev.is_some_and(|val| val < row.dobavni_rok.unwrap_or(0.)) {
+                        row_color = RED;
+                    }
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    ui.label(row.trenutna_zaloga_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v, 1)));
+                    row_color = old;
+                });
+            }
+            ViewQueryFields::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    ui.label(row.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.map_or("".to_string(), |v| format_number_custom(v, 1)));
+                });
+            }
+            ViewQueryFields::Dobavitelji => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    let t = row.dobavitelji.clone().unwrap_or_else(|| "".to_string());
+                    ui.label(&t);
+                });
+            }
+            ViewQueryFields::Cena => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    ui.label(row.cena.map_or("".to_string(), |v| format_number_custom(v, 1)));
+                });
+
+            }
+            ViewQueryFields::Valuta => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    let t = row.valuta.clone().unwrap_or_else(|| "".to_string());
+                    ui.label(&t);
+                });
+            }
+            ViewQueryFields::RazpolozljivaZaloga => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    ui.label(row.razpolozljiva_zaloga.map_or("".to_string(), |v| format_number_custom(v, 1)));
+                });
+            }
+            ViewQueryFields::Lokacija => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    let t = row.lokacija.clone().unwrap_or_else(|| "".to_string());
+                    ui.label(&t);
+                });
+            }
+            ViewQueryFields::MinimalnaZaloga => {
+                table_row.col(|ui| {
+                    let old = row_color;
+                    if row.minimalna_zaloga.is_some_and(|val| val > (row.zaloga.unwrap_or(0.) + row.odprta_narocila.unwrap_or(0.)))  {
+                        // teal
+                        row_color = TEAL;
+                    }
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+
+                    if *editing_min_zaloga_row == Some(index) {
+                        let response = ui.text_edit_singleline(edit_min_zaloga_row_input);
+                        if response.lost_focus() {
+                            *editing_min_zaloga_row = None;
+
+                            let os_resp = MessageDialog::new()
+                                .set_title("Potrdi vnos")
+                                .set_level(MessageLevel::Info)
+                                .set_buttons(MessageButtons::OkCancel)
+                                .show();
+
+                            match os_resp {
+                                MessageDialogResult::Ok => {
+                                    let _ = db_manager.store_min_zaloga((
+                                                                                 row.material,
+                                                                                 edit_min_zaloga_row_input.clone().parse::<f64>().ok()),
+                                    );
+                                    row_data.query(db_manager, sort_state);
+                                },
+                                _ => {}
+                            }
+                        }
+
+                    } else {
+                        let label_text = row.minimalna_zaloga.map_or(" ".repeat(28), |v| format_number_custom(v, 0));
+                        let resp = ui.label(label_text).on_hover_cursor(CursorIcon::Help);
+                        if resp.double_clicked() {
+                            *editing_min_zaloga_row = Some(index);
+                            *edit_min_zaloga_row_input = row.minimalna_zaloga.map_or("".to_string(), |v| format_number_custom(v, 0));
+                        }
+
+                    }
+
+
+                    row_color = old;
+                });
+            }
+            ViewQueryFields::MaximalnaZaloga => {
+                table_row.col(|ui| {
+                    let old = row_color;
+                    if row.maximalna_zaloga.is_some_and(|val| val < row.zaloga.unwrap_or(0.)) {
+                        // indigo
+                        row_color = INDIGO;
+                    }
+
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+
+                    if *editing_max_zaloga_row == Some(index) {
+                        let response = ui.text_edit_singleline(edit_max_zaloga_row_input);
+                        if response.lost_focus() {
+                            *editing_max_zaloga_row = None;
+
+                            let os_resp = MessageDialog::new()
+                                .set_title("Potrdi vnos")
+                                .set_level(MessageLevel::Info)
+                                .set_buttons(MessageButtons::OkCancel)
+                                .show();
+
+                            match os_resp {
+                                MessageDialogResult::Ok => {
+                                    let _ = db_manager.store_max_zaloga((
+                                                                                 row.material,
+                                                                                 edit_max_zaloga_row_input.clone().parse::<f64>().ok()),
+                                    );
+                                    row_data.query(db_manager, sort_state);
+                                },
+                                _ => {}
+                            }
+                        }
+
+                    } else {
+                        let label_text = row.maximalna_zaloga.map_or(" ".repeat(28), |v| format_number_custom(v, 0));
+                        let resp = ui.label(label_text).on_hover_cursor(CursorIcon::Help);
+                        if resp.double_clicked() {
+                            *editing_max_zaloga_row = Some(index);
+                            *edit_max_zaloga_row_input = row.maximalna_zaloga.map_or("".to_string(), |v| format_number_custom(v, 0));
+                        }
+
+                    }
+
+
+                    row_color = old;
+                });
+            }
+            ViewQueryFields::BlagovnaSkupina => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+
+                    if *editing_blagovna_skupina_row == Some(index) {
+                        let response = ui.text_edit_singleline(edit_blagovna_skupina_input);
+                        if response.lost_focus() {
+                            *editing_blagovna_skupina_row = None;
+
+                            let os_resp = MessageDialog::new()
+                                .set_title("Potrdi vnos")
+                                .set_level(MessageLevel::Info)
+                                .set_buttons(MessageButtons::OkCancel)
+                                .show();
+
+                            match os_resp {
+                                MessageDialogResult::Ok => {
+                                    let _ = db_manager.store_blagovna_skupina((
+                                                                                       row.material,
+                                                                                       edit_blagovna_skupina_input.clone()),
+                                    );
+                                    row_data.query(db_manager, sort_state);
+                                },
+                                _ => {}
+                            }
+                        }
+
+                    } else {
+                        let mut label_text = row.blagovna_skupina.clone().unwrap_or(" ".repeat(30));
+                        if label_text.is_empty() {
+                            label_text = " ".repeat(73);
+                        }
+                        let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
+                        if resp.double_clicked() {
+                            *editing_blagovna_skupina_row = Some(index);
+                            *edit_blagovna_skupina_input = row.blagovna_skupina.clone().unwrap_or(String::new());
+                        }
+
+                    }
+                });
+            }
+            ViewQueryFields::Pakiranje => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+
+                    if *editing_pakiranje_row == Some(index) {
+                        let response = ui.text_edit_singleline(edit_pakiranje_input);
+                        if response.lost_focus() {
+                            *editing_pakiranje_row = None;
+
+                            let os_resp = MessageDialog::new()
+                                .set_title("Potrdi vnos")
+                                .set_level(MessageLevel::Info)
+                                .set_buttons(MessageButtons::OkCancel)
+                                .show();
+
+                            match os_resp {
+                                MessageDialogResult::Ok => {
+                                    let _ = db_manager.store_pakiranje((
+                                                                                row.material,
+                                                                                edit_pakiranje_input.clone()),
+                                    );
+                                    row_data.query(db_manager, sort_state);
+                                },
+                                _ => {}
+                            }
+                        }
+
+                    } else {
+                        let mut label_text = row.pakiranje.clone().unwrap_or_else(|| " ".repeat(20));
+                        if label_text.is_empty() {
+                            label_text = " ".repeat(20);
+                        }
+                        let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
+                        if resp.double_clicked() {
+                            *editing_pakiranje_row = Some(index);
+                            *edit_pakiranje_input = row.pakiranje.clone().unwrap_or(String::new());
+                        }
+
+                    }
+                });
+            }
+            ViewQueryFields::Opomba => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+
+                    if *editing_opomba_row == Some(index) {
+                        let response = ui.text_edit_singleline(edit_opomba_input);
+                        if response.lost_focus() {
+                            *editing_opomba_row = None;
+
+                            let os_resp = MessageDialog::new()
+                                .set_title("Potrdi vnos")
+                                .set_level(MessageLevel::Info)
+                                .set_buttons(MessageButtons::OkCancel)
+                                .show();
+
+                            match os_resp {
+                                MessageDialogResult::Ok => {
+                                    let _ = db_manager.store_opomba_to_db((
+                                                                                   row.material,
+                                                                                   edit_opomba_input.clone()),
+                                    );
+                                    row_data.query(db_manager, sort_state);
+                                },
+                                _ => {}
+                            }
+                        }
+
+                    } else {
+                        let mut label_text = row.opomba.clone().unwrap_or_else(|| " ".repeat(73));
+                        if label_text.is_empty() {
+                            label_text = " ".repeat(73);
+                        }
+                        let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
+                        if resp.double_clicked() {
+                            *editing_opomba_row = Some(index);
+                            *edit_opomba_input = row.opomba.clone().unwrap_or(String::new());
+                        }
+
+                    }
+                });
+            }
+        }
+    }
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
-            SortColumn::Material => "material",
-            SortColumn::NazivMateriala => "naziv_materiala",
-            SortColumn::OsnovnaMerskaEnota => "osnovna_merska_enota",
-            SortColumn::NabavnaSkupina => "nabavna_skupina",
-            SortColumn::MRP => "mrp_karakteristika",
-            SortColumn::Zaloga => "zaloga",
-            SortColumn::Poraba3M => "poraba_3m",
-            SortColumn::Poraba24M => "poraba_24m",
-            &SortColumn::OdprtaNarocila => "odprta_narocila",
-            SortColumn::DobavniRok => "dobavni_rok",
-            SortColumn::TrenutnaZalogaZadostujeZaMesecev => "trenutna_zaloga_zadostuje_za_mesecev",
-            SortColumn::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => "trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev",
-            SortColumn::Dobavitelji => "dobavitelji",
-            SortColumn::Cena => "cena",
-            SortColumn::Valuta => "valuta",
-            SortColumn::RazpolozljivaZaloga => "razpolozljiva_zaloga",
-            SortColumn::MinimalnaZaloga => "minimalna_zaloga",
-            SortColumn::MaximalnaZaloga => "maximalna_zaloga",
-            SortColumn::BlagovnaSkupina => "blagovna_skupina",
-            SortColumn::Pakiranje => "pakiranje",
-            SortColumn::Lokacija => "lokacija",
-            SortColumn::Opomba => "opomba",
+            ViewQueryFields::Material => "material",
+            ViewQueryFields::NazivMateriala => "naziv_materiala",
+            ViewQueryFields::OsnovnaMerskaEnota => "osnovna_merska_enota",
+            ViewQueryFields::NabavnaSkupina => "nabavna_skupina",
+            ViewQueryFields::MRP => "mrp_karakteristika",
+            ViewQueryFields::Zaloga => "zaloga",
+            ViewQueryFields::Poraba3M => "poraba_3m",
+            ViewQueryFields::Poraba24M => "poraba_24m",
+            ViewQueryFields::OdprtaNarocila => "odprta_narocila",
+            ViewQueryFields::DobavniRok => "dobavni_rok",
+            ViewQueryFields::TrenutnaZalogaZadostujeZaMesecev => "trenutna_zaloga_zadostuje_za_mesecev",
+            ViewQueryFields::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => "trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev",
+            ViewQueryFields::Dobavitelji => "dobavitelji",
+            ViewQueryFields::Cena => "cena",
+            ViewQueryFields::Valuta => "valuta",
+            ViewQueryFields::RazpolozljivaZaloga => "razpolozljiva_zaloga",
+            ViewQueryFields::MinimalnaZaloga => "minimalna_zaloga",
+            ViewQueryFields::MaximalnaZaloga => "maximalna_zaloga",
+            ViewQueryFields::BlagovnaSkupina => "blagovna_skupina",
+            ViewQueryFields::Pakiranje => "pakiranje",
+            ViewQueryFields::Lokacija => "lokacija",
+            ViewQueryFields::Opomba => "opomba",
         }
     }
 }
 
 pub struct SortState {
-    pub sort_column: SortColumn,
+    pub sort_column: ViewQueryFields,
     pub descending: bool,
 }
 
 impl Default for SortState {
     fn default() -> Self {
         SortState {
-            sort_column: SortColumn::default(),
+            sort_column: ViewQueryFields::default(),
             descending: false,
         }
     }

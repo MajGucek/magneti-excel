@@ -1,9 +1,9 @@
 use chrono::NaiveDate;
-use eframe::egui::{Color32, CornerRadius, CursorIcon, RichText};
-use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
-use sqlite::{Connection, State};
-use serde::{Deserialize, Serialize};
+use sqlite::{Connection};
+use magneti_excel::{NabavaQuery, PorabaQuery, SortState, ViewQuery};
 use crate::parse::{DobaviteljRow, NabavaData, PorabaData, RazpolozljivaZalogaRow, RowData, SifrantRow};
+
+
 
 pub struct DBManager {
     pub db_name: String
@@ -38,6 +38,22 @@ impl DBManager {
         self.create_pakiranje_table(&connection)?;
 
         Ok(())
+    }
+
+
+    pub fn get_data(&self, sort: &SortState) -> Result<Vec<ViewQuery>, Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        ViewQuery::query(&connection, &sort)
+    }
+
+    pub fn get_poraba(&self, material: i64) -> Result<Vec<PorabaQuery>, Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        PorabaQuery::query(material, &connection)
+    }
+
+    pub fn get_nabava(&self, material: i64) -> Result<Vec<NabavaQuery>, Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        NabavaQuery::query(material, &connection)
     }
 
 
@@ -412,7 +428,7 @@ impl DBManager {
         Ok(())
     }
 
-    pub fn store_opomba_to_db(&self, opomba: (i64, String)) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn store_opomba(&self, opomba: (i64, String)) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
         self.create_opomba_table(&connection)?;
 

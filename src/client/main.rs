@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(deprecated)] // I am not learning a whole new ecosystem
 
-mod parse;
 mod db;
 mod graph;
 
@@ -19,7 +18,6 @@ use rfd::{MessageDialog, MessageLevel};
 use rust_xlsxwriter::{Format, Note, Workbook};
 use serde::{Deserialize, Serialize};
 use crate::db::{DBManager, ViewQueryFields, SortState, ViewQuery};
-use crate::parse::{parse_all_files};
 
 
 static YELLOW: Color32 = Color32::YELLOW;
@@ -113,11 +111,8 @@ impl App {
         });
 
         let mut row_data = None;
-        let db_manager = DBManager { db_name: "magneti_db.sqlite3".to_string() };
-        let _ = db_manager.try_create_tables();
+        let db_manager = DBManager { url: "http://127.0.0.1:8080".to_string() };
         let sort_state = SortState::default();
-        let _ = db_manager.try_drop_view();
-        let _ = db_manager.try_create_view();
 
         let result = db_manager.get_data(&sort_state);
 
@@ -369,6 +364,7 @@ pub struct Rows {
 
 impl Rows {
     fn query(&mut self, db_manager: &DBManager, sort_state: &SortState) -> Option<bool> {
+        log::info!("querying");
         match db_manager.get_data(&sort_state) {
             Ok(rows) => {
                 self.row_data = Some(rows);
@@ -640,7 +636,9 @@ impl eframe::App for App {
         ctx.request_repaint_after(Duration::from_millis(100));
 
         let data = match &self.row_data.row_data {
-            Some(d) => self.apply_filters(d),
+            Some(d) => {
+                self.apply_filters(d)
+            },
             None => Vec::new(),
         };
 
@@ -857,40 +855,6 @@ impl eframe::App for App {
 
                ui.separator();
 
-               if ui.button("Vnos Excel-ov").clicked() {
-                   let dir = dirs_next::document_dir().unwrap_or_else(|| std::path::PathBuf::from("C:\\"));
-                   let files = rfd::FileDialog::new()
-                       .set_title("Izberi vse datoteke")
-                       .set_directory(dir)
-                       .pick_files();
-                   if files.is_some() {
-                       let res = parse_all_files(files.unwrap(), &self.db_manager);
-                       ui.ctx().request_repaint();
-                       log::info!("after request paint, after import!");
-                       self.row_data.query(&self.db_manager, &self.sort_state);
-                       match res {
-                           Ok(_) => {
-                               MessageDialog::new()
-                                   .set_title("Uspeh")
-                                   .set_description("Shranil Excel-e")
-                                   .set_level(MessageLevel::Info)
-                                   .show();
-                           },
-                           Err(e) => {
-                               MessageDialog::new()
-                                   .set_title("Napaka")
-                                   .set_description(format!("Napaka pri obdelavi Excel-ov\n {:?}", e.to_string()))
-                                   .set_level(MessageLevel::Error)
-                                   .show();
-                           },
-                       }
-
-                   }
-
-               }
-
-               ui.separator();
-
                ui.label(format!("Število zadetkov: {}", &data.len()));
 
 
@@ -904,7 +868,6 @@ impl eframe::App for App {
         if changed {
             self.row_config.save()
         }
-
 
         CentralPanel::default().show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {

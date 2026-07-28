@@ -7,7 +7,7 @@ pub fn convert_to_sql(date: NaiveDate) -> String {
     date.format("%Y-%m-%d").to_string()
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct PorabaQuery {
     pub poraba: f64,
     pub month: String
@@ -41,7 +41,7 @@ impl PorabaQuery {
 }
 
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct NabavaQuery {
     pub nabava: f64,
     pub month: String
@@ -75,9 +75,26 @@ impl NabavaQuery {
 }
 
 
+#[derive(Serialize, Deserialize)]
+pub enum HandInput {
+    DobavniRok(i64, Option<f64>),
+    Opomba(i64, String),
+    MinZaloga(i64, Option<f64>),
+    MaxZaloga(i64, Option<f64>),
+    BlagovnaSkupina(i64, String),
+    Pakiranje(i64, String)
+}
+
+impl FromStr for HandInput {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
+}
 
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct ViewQuery {
     pub material: i64,
     pub naziv_materiala: Option<String>,

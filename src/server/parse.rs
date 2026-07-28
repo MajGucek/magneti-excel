@@ -16,7 +16,7 @@ pub fn get_existing_files(folder: PathBuf) -> Vec<PathBuf> {
 
 
 
-pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &Arc<Mutex<DBManager>>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn parse_and_upload_all_files(files: Vec<PathBuf>, db_manager: &Arc<Mutex<DBManager>>) -> Result<(), Box<dyn std::error::Error>> {
     let sifrant_file = files.iter().filter(|file| {
         match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
             "ŠIFRANT.XLSX" => true,

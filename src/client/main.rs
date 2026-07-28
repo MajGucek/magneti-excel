@@ -1011,7 +1011,7 @@ fn main() {
 
 
     eframe::run_native(
-        "Magneti Excel",
+        "Magneti Uporabnik",
         NativeOptions::default(),
         Box::new(|cc| Ok(Box::new(App::new(cc))))
     ).unwrap();

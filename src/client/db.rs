@@ -1,42 +1,60 @@
+use std::time::{Duration, Instant};
 use eframe::egui::{Color32, CornerRadius, CursorIcon, RichText};
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 pub(crate) use magneti_excel::{NabavaQuery, PorabaQuery, SortState, ViewQuery, ViewQueryFields};
-use magneti_excel::HandInput;
+use magneti_excel::{format_elapsed_time, HandInput};
 use crate::graph::PorabaNabavaRows;
 use crate::{format_nabavnik, format_number_custom, parse_string_to_optional_f64, Rows, INDIGO, RED, TEAL};
 
 pub struct DBManager {
-    url: String
+    url: String,
+    last_query: Option<Instant>,
 }
 
 impl DBManager {
+    pub fn get_last_query_time(&self) -> String {
+        match self.last_query {
+            Some(i) => {
+                format_elapsed_time(i)
+            },
+            None => {
+                String::new()
+            }
+        }
+    }
+
     pub fn create(url: &str) -> Self {
         Self {
             url: url.to_string(),
+            last_query: None,
         }
     }
     pub fn update_url(&mut self, url: &str) {
         log::info!("Updating server IP");
         self.url = format!("http://{}:8080", url);
     }
-    pub fn get_data(&self, sort: &SortState) -> Result<Vec<ViewQuery>, Box<dyn std::error::Error>> {
+    pub fn get_data(&mut self, sort: &SortState) -> Result<Vec<ViewQuery>, Box<dyn std::error::Error>> {
         log::info!("sending request to server");
         let sort_json = serde_json::to_string(sort)?;
         let req_url = format!("{}/data/0/{}/{}", self.url, usize::MAX,  urlencoding::encode(&sort_json));
 
+        self.last_query = Some(Instant::now());
         let data: Vec<ViewQuery> = ureq::get(&req_url).call()?.body_mut().with_config().limit(u64::MAX).read_json()?;
         log::info!("Exiting get_data()");
         Ok(data)
     }
 
-    pub fn get_poraba(&self, material: i64) -> Result<Vec<PorabaQuery>, Box<dyn std::error::Error>> {
+    pub fn get_poraba(&mut self, material: i64) -> Result<Vec<PorabaQuery>, Box<dyn std::error::Error>> {
         let req_url = format!("{}/poraba/{}", self.url, material);
+
+        self.last_query = Some(Instant::now());
         let data: Vec<PorabaQuery> = ureq::get(&req_url).call()?.body_mut().read_json()?;
         Ok(data)
     }
-    pub fn get_nabava(&self, material: i64) -> Result<Vec<NabavaQuery>, Box<dyn std::error::Error>> {
+    pub fn get_nabava(&mut self, material: i64) -> Result<Vec<NabavaQuery>, Box<dyn std::error::Error>> {
         let req_url = format!("{}/nabava/{}", self.url, material);
 
+        self.last_query = Some(Instant::now());
         let data: Vec<NabavaQuery> = ureq::get(&req_url).call()?.body_mut().read_json()?;
         Ok(data)
     }
@@ -138,7 +156,7 @@ pub fn construct_body(field: ViewQueryFields,
                       row: &ViewQuery,
                       mut row_color: Color32,
                       poraba_nabava_data: &mut PorabaNabavaRows,
-                      db_manager: &DBManager,
+                      mut db_manager: &mut DBManager,
                       sort_state: &SortState,
                       row_data: &mut Rows,
                       editing_dobavni_rok_row: &mut Option<usize>,
@@ -162,7 +180,7 @@ pub fn construct_body(field: ViewQueryFields,
                     .on_hover_cursor(CursorIcon::PointingHand)
                     .clicked() {
 
-                    poraba_nabava_data.query(row.material, row.naziv_materiala.as_ref().unwrap_or(&"".to_string()).as_str(), row.zaloga.unwrap_or(0.),  &db_manager);
+                    poraba_nabava_data.query(row.material, row.naziv_materiala.as_ref().unwrap_or(&"".to_string()).as_str(), row.zaloga.unwrap_or(0.),  &mut db_manager);
                 }
             });
         }
@@ -254,7 +272,7 @@ pub fn construct_body(field: ViewQueryFields,
                                     row.material,
                                     parse_string_to_optional_f64(edit_dobavni_rok_input.as_str()),
                                 ));
-                                row_data.query(db_manager, sort_state);
+                                row_data.query(&mut db_manager, sort_state);
                             },
                             _ => {}
                         }
@@ -447,7 +465,7 @@ pub fn construct_body(field: ViewQueryFields,
                 } else {
                     let mut label_text = row.blagovna_skupina.clone().unwrap_or(" ".repeat(30));
                     if label_text.is_empty() {
-                        label_text = " ".repeat(73);
+                        label_text = " ".repeat(1);
                     }
                     let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
                     if resp.double_clicked() {

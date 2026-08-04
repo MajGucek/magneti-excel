@@ -199,7 +199,7 @@ impl PorabaNabavaRows {
         ui.interact(rect, ui.id(), Sense::click()).clicked()
     }
 
-    pub fn query(&mut self, material: i64, naziv: &str, zaloga_sum: f64,  db_manager: &DBManager) {
+    pub fn query(&mut self, material: i64, naziv: &str, zaloga_sum: f64,  db_manager: &mut DBManager) {
         let raw_poraba_data: Vec<(String, f64)> = match db_manager.get_poraba(material) {
             Ok(rows) => {
                 let mut data = Vec::new();

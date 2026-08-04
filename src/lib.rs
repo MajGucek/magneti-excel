@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::time::{Duration, Instant};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sqlite::{Connection, State};
@@ -286,5 +287,45 @@ impl SortState {
                 self.sort_column.as_str(),
                 if self.descending { "DESC" } else { "ASC" }
         )
+    }
+}
+
+
+pub fn format_elapsed_time(instant: Instant) -> String {
+    let elapsed = instant.elapsed();
+    format_duration(elapsed)
+}
+
+pub fn format_duration(d: Duration) -> String {
+    let secs = d.as_secs();
+
+    if secs < 1 {
+        "just now".to_string()
+    } else if secs < 60 {
+        format!("{secs}s ago")
+    } else if secs < 3600 {
+        let mins = secs / 60;
+        let rem_secs = secs % 60;
+        if rem_secs == 0 {
+            format!("{mins}m ago")
+        } else {
+            format!("{mins}m {rem_secs}s ago")
+        }
+    } else if secs < 86400 {
+        let hours = secs / 3600;
+        let mins = (secs % 3600) / 60;
+        if mins == 0 {
+            format!("{hours}h ago")
+        } else {
+            format!("{hours}h {mins}m ago")
+        }
+    } else {
+        let days = secs / 86400;
+        let hours = (secs % 86400) / 3600;
+        if hours == 0 {
+            format!("{days}d ago")
+        } else {
+            format!("{days}d {hours}h ago")
+        }
     }
 }

@@ -116,23 +116,12 @@ impl App {
 
         let config = Config::load();
 
-        let mut row_data = None;
-        let db_manager = DBManager::create(config.get_url());
+
+        let mut row_data = Rows::default();
+        let mut db_manager = DBManager::create(config.get_url());
         let sort_state = SortState::default();
 
-        let result = db_manager.get_data(&sort_state);
-
-        match result {
-            Err(err) => {
-                log::error!("initial_load error: {:?}", err.to_string());
-                Some(false)
-            },
-            Ok(rows) => {
-                row_data = Some(rows);
-                log::info!("row_data loaded: {}", row_data.as_ref().unwrap().len());
-                Some(true)
-            }
-        };
+        row_data.query(&mut db_manager, &sort_state);
 
         let url = config.get_url();
         log::info!("Full url: {:?}", url);
@@ -145,7 +134,7 @@ impl App {
             db_manager,
             last_query: Instant::now(),
 
-            row_data: Rows {row_data},
+            row_data,
             config,
             sort_state,
             poraba_nabava_data: PorabaNabavaRows::default(),
@@ -293,7 +282,6 @@ pub fn render_choose_panel(ctx: &Context, row_config: &mut Config) -> bool {
                     .id_salt("avail_cols")
                     .max_height(280.0)
                     .show(ui, |ui| {
-                        //let display_columns = row_config.get_mut_display_columns();
                         for field in ViewQueryFields::ALL {
                             if !display_columns.contains(&field) {
                                 ui.horizontal(|ui| {
@@ -329,7 +317,12 @@ pub struct Rows {
 }
 
 impl Rows {
-    fn query(&mut self, db_manager: &DBManager, sort_state: &SortState) -> Option<bool> {
+    fn default() -> Self {
+        Rows {
+            row_data: None,
+        }
+    }
+    fn query(&mut self, db_manager: &mut DBManager, sort_state: &SortState) -> Option<bool> {
         log::info!("querying");
         match db_manager.get_data(&sort_state) {
             Ok(rows) => {
@@ -463,7 +456,7 @@ impl App {
                                 row,
                                 row_color,
                                 &mut self.poraba_nabava_data,
-                                &self.db_manager,
+                                &mut self.db_manager,
                                 &mut self.sort_state,
                                 &mut self.row_data,
                                 &mut self.editing_dobavni_rok_row,
@@ -600,7 +593,7 @@ impl eframe::App for App {
         if self.last_query.elapsed() >= Duration::from_mins(5) {
             self.last_query = Instant::now();
 
-            self.row_data.query(&self.db_manager, &self.sort_state);
+            self.row_data.query(&mut self.db_manager, &self.sort_state);
             log::info!("Refreshed data");
         }
 
@@ -773,8 +766,10 @@ impl eframe::App for App {
                    self.config.update_url(self.db_address.as_str());
                }
 
+               //ui.heading(self.db_manager.get_last_query_time());
+
                if ui.button("Osveži").clicked() {
-                   self.row_data.query(&self.db_manager, &self.sort_state);
+                   self.row_data.query(&mut self.db_manager, &self.sort_state);
                    log::info!("Manually refreshed data");
                }
 
@@ -842,7 +837,7 @@ impl eframe::App for App {
 
 
                    self.sort_state = SortState::default();
-                   self.row_data.query(&self.db_manager, &self.sort_state);
+                   self.row_data.query(&mut self.db_manager, &self.sort_state);
                    log::info!("Refreshed data after filter reset");
                }
 
@@ -885,7 +880,7 @@ impl eframe::App for App {
         let new_sort = self.sort_state.descending;
 
         if old_sort != new_sort || old_column != new_column {
-            self.row_data.query(&self.db_manager, &self.sort_state);
+            self.row_data.query(&mut self.db_manager, &self.sort_state);
             log::info!("Refreshed data due to old_sort != new_sort");
         }
     }

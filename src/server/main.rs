@@ -1,4 +1,4 @@
-//#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(deprecated)]
 
 mod db;
@@ -67,7 +67,7 @@ impl FolderWatcher {
                         if refresh {
                             match event.kind {
                                 EventKind::Create(_)
-                                //| EventKind::Modify(_)
+                                | EventKind::Modify(_)
                                 => {
                                     let files = get_existing_files(folder.clone());
                                     let res = parse_and_upload_all_files(files, &db_manager_thread);
@@ -355,7 +355,6 @@ fn main() {
         .init();
 
     log::info!("Server started");
-
 
     eframe::run_native(
         "Magneti Strežnik",

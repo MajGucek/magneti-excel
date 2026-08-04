@@ -6,6 +6,7 @@ mod graph;
 
 mod config;
 
+use std::sync::Arc;
 use graph::*;
 
 
@@ -981,6 +982,23 @@ fn parse_string_to_optional_f64(s: &str) -> Option<f64> {
     }
 }
 
+
+fn load_taskbar_icon() -> Arc<IconData> {
+    let icon_bytes = include_bytes!("icon.png");
+
+    let image = image::load_from_memory(icon_bytes)
+        .expect("Failed to open icon path")
+        .into_rgba8();
+
+    let (width, height) = image.dimensions();
+
+    Arc::new(IconData {
+        rgba: image.into_raw(),
+        width,
+        height,
+    })
+}
+
 fn main() {
     let debug = true;
 
@@ -993,10 +1011,17 @@ fn main() {
 
     log::info!("Client started");
 
+    let icon = load_taskbar_icon();
+    let options = NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_icon(icon)
+            .with_title("Uporabnik"),
+        ..Default::default()
+    };
 
     eframe::run_native(
-        "Magneti Uporabnik",
-        NativeOptions::default(),
+        "Uporabnik",
+        options,
         Box::new(|cc| Ok(Box::new(App::new(cc))))
     ).unwrap();
 }

@@ -8,7 +8,6 @@ mod config;
 
 use graph::*;
 
-use db::ViewQueryFields::*;
 
 use std::time::{Duration, Instant};
 use eframe::{NativeOptions};
@@ -18,7 +17,7 @@ use egui_extras::{Column, TableBuilder};
 use env_logger::Env;
 use rfd::{MessageDialog, MessageLevel};
 use rust_xlsxwriter::{Format, Note, Workbook};
-use serde::{Deserialize, Serialize};
+use serde::{Serialize};
 use crate::config::Config;
 use crate::db::{DBManager, ViewQueryFields, SortState, ViewQuery};
 

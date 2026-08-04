@@ -6,16 +6,26 @@ use crate::graph::PorabaNabavaRows;
 use crate::{format_nabavnik, format_number_custom, parse_string_to_optional_f64, Rows, INDIGO, RED, TEAL};
 
 pub struct DBManager {
-    pub url: String
+    url: String
 }
 
 impl DBManager {
+    pub fn create(url: &str) -> Self {
+        Self {
+            url: url.to_string(),
+        }
+    }
+    pub fn update_url(&mut self, url: &str) {
+        log::info!("Updating server IP");
+        self.url = format!("http://{}:8080", url);
+    }
     pub fn get_data(&self, sort: &SortState) -> Result<Vec<ViewQuery>, Box<dyn std::error::Error>> {
         log::info!("sending request to server");
         let sort_json = serde_json::to_string(sort)?;
         let req_url = format!("{}/data/0/{}/{}", self.url, usize::MAX,  urlencoding::encode(&sort_json));
 
         let data: Vec<ViewQuery> = ureq::get(&req_url).call()?.body_mut().with_config().limit(u64::MAX).read_json()?;
+        log::info!("Exiting get_data()");
         Ok(data)
     }
 

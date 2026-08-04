@@ -4,6 +4,8 @@
 mod db;
 mod graph;
 
+mod config;
+
 use graph::*;
 
 use db::ViewQueryFields::*;
@@ -17,6 +19,7 @@ use env_logger::Env;
 use rfd::{MessageDialog, MessageLevel};
 use rust_xlsxwriter::{Format, Note, Workbook};
 use serde::{Deserialize, Serialize};
+use crate::config::Config;
 use crate::db::{DBManager, ViewQueryFields, SortState, ViewQuery};
 
 
@@ -31,11 +34,12 @@ static INDIGO: Color32 = Color32::from_rgb(180, 100, 255);
 
 
 struct App {
+    db_address: String,
     db_manager: DBManager,
     last_query: Instant,
 
     row_data: Rows,
-    row_config: RowConfig,
+    config: Config,
     sort_state: SortState,
 
     poraba_nabava_data: PorabaNabavaRows,
@@ -110,8 +114,10 @@ impl App {
             s.visuals.override_text_color = Some(Color32::from_rgb(5, 5, 5));
         });
 
+        let config = Config::load();
+
         let mut row_data = None;
-        let db_manager = DBManager { url: "http://127.0.0.1:8080".to_string() };
+        let db_manager = DBManager::create(config.get_url());
         let sort_state = SortState::default();
 
         let result = db_manager.get_data(&sort_state);
@@ -128,12 +134,19 @@ impl App {
             }
         };
 
+        let url = config.get_url();
+        log::info!("Full url: {:?}", url);
+        let db_address = url.trim_start_matches("http://")
+            .split(":")
+            .next()
+            .unwrap_or("").to_string();
         Self {
+            db_address,
             db_manager,
             last_query: Instant::now(),
 
             row_data: Rows {row_data},
-            row_config: RowConfig::load(),
+            config,
             sort_state,
             poraba_nabava_data: PorabaNabavaRows::default(),
 
@@ -200,60 +213,10 @@ impl App {
 
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct RowConfig {
-    pub display_columns: Vec<ViewQueryFields>
-}
-
-impl RowConfig {
-    fn path() -> std::path::PathBuf {
-        "config.json".into()
-    }
-
-    pub fn load() -> Self {
-        std::fs::read_to_string(Self::path())
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_else(|| RowConfig::default() )
-    }
-
-    pub fn save(&self) {
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(Self::path(), json);
-        }
-    }
-    pub fn default() -> Self {
-        RowConfig {
-            display_columns: vec![
-                Material,
-                NazivMateriala,
-                RazpolozljivaZaloga,
-                Zaloga,
-                Poraba3M,
-                Poraba24M,
-                OdprtaNarocila,
-                DobavniRok,
-                TrenutnaZalogaZadostujeZaMesecev,
-                TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev,
-                Cena,
-                Valuta,
-                OsnovnaMerskaEnota,
-                MinimalnaZaloga,
-                MaximalnaZaloga,
-                Pakiranje,
-                Lokacija,
-                MRP,
-                BlagovnaSkupina,
-                Opomba,
-                NabavnaSkupina,
-                Dobavitelji,
-            ],
-        }
-    }
-}
 
 
-pub fn render_choose_panel(ctx: &Context, row_config: &mut RowConfig) -> bool {
+
+pub fn render_choose_panel(ctx: &Context, row_config: &mut Config) -> bool {
     let mut changed = false;
 
     let open_id = Id::new("column_choose_open");
@@ -280,19 +243,20 @@ pub fn render_choose_panel(ctx: &Context, row_config: &mut RowConfig) -> bool {
                 let mut move_up = None;
                 let mut move_down = None;
                 let mut remove_idx = None;
-                let can_remove = row_config.display_columns.len() > 1;
+                let display_columns = row_config.get_mut_display_columns();
+                let can_remove = display_columns.len() > 1;
 
                 ScrollArea::vertical()
                     .id_salt("active_cols")
                     .max_height(280.0)
                     .show(ui, |ui| {
-                        for (i, field) in row_config.display_columns.iter().enumerate() {
+                        for (i, field) in display_columns.iter().enumerate() {
                             ui.horizontal(|ui| {
                                 if ui.small_button("^").clicked() && i > 0 {
                                     move_up = Some(i);
                                 }
                                 if ui.small_button("v").clicked()
-                                    && i + 1 < row_config.display_columns.len()
+                                    && i + 1 < display_columns.len()
                                 {
                                     move_down = Some(i);
                                 }
@@ -307,16 +271,16 @@ pub fn render_choose_panel(ctx: &Context, row_config: &mut RowConfig) -> bool {
                     });
 
                 if let Some(i) = move_up {
-                    row_config.display_columns.swap(i, i - 1);
+                    display_columns.swap(i, i - 1);
                     changed = true;
                 }
                 if let Some(i) = move_down {
-                    row_config.display_columns.swap(i, i + 1);
+                    display_columns.swap(i, i + 1);
                     changed = true;
                 }
                 if let Some(i) = remove_idx {
-                    if row_config.display_columns.len() > 1 {
-                        row_config.display_columns.remove(i);
+                    if display_columns.len() > 1 {
+                        display_columns.remove(i);
                         changed = true;
                     }
                 }
@@ -328,8 +292,9 @@ pub fn render_choose_panel(ctx: &Context, row_config: &mut RowConfig) -> bool {
                     .id_salt("avail_cols")
                     .max_height(280.0)
                     .show(ui, |ui| {
+                        //let display_columns = row_config.get_mut_display_columns();
                         for field in ViewQueryFields::ALL {
-                            if !row_config.display_columns.contains(&field) {
+                            if !display_columns.contains(&field) {
                                 ui.horizontal(|ui| {
                                     if ui.small_button("+").clicked() {
                                         to_add = Some(field);
@@ -341,13 +306,13 @@ pub fn render_choose_panel(ctx: &Context, row_config: &mut RowConfig) -> bool {
                     });
 
                 if let Some(f) = to_add {
-                    row_config.display_columns.insert(0, f);
+                    display_columns.insert(0, f);
                     changed = true;
                 }
 
                 ui.separator();
                 if ui.button("Ponastavi").clicked() {
-                    *row_config = RowConfig::default();
+                    *row_config = Config::default();
                     changed = true;
                 }
             });
@@ -368,6 +333,7 @@ impl Rows {
         match db_manager.get_data(&sort_state) {
             Ok(rows) => {
                 self.row_data = Some(rows);
+                log::info!("Loaded row_data");
                 Some(true)
             }
             Err(err) => {
@@ -468,13 +434,14 @@ impl App {
     pub fn render_table(&mut self, ui: &mut Ui, data: &Vec<ViewQuery>) {
         ScrollArea::both().show(ui, |ui| {
             ui.style_mut().visuals.faint_bg_color = Color32::from_rgb(200, 200, 200);
+            let display_columns = self.config.get_mut_display_columns();
             TableBuilder::new(ui)
                 .striped(true)
                 .cell_layout(Layout::left_to_right(Align::Center))
                 .resizable(true)
-                .columns(Column::auto().resizable(true), self.row_config.display_columns.len())
+                .columns(Column::auto().resizable(true), display_columns.len())
                 .header(50.0, |mut header| {
-                    self.row_config.display_columns.iter().for_each(|&column| {
+                    display_columns.iter().for_each(|&column| {
                         db::construct_headers(column, &mut header, &mut self.sort_state.sort_column);
                     });
                 })
@@ -485,7 +452,7 @@ impl App {
                         let colors = calculate_colors(row);
                         let row_color = colors.last().cloned().unwrap_or(Color32::TRANSPARENT);
 
-                        self.row_config.display_columns.iter().for_each(|&column| {
+                        display_columns.iter().for_each(|&column| {
                             db::construct_body(
                                 column,
                                 &mut table_row,
@@ -631,16 +598,24 @@ impl eframe::App for App {
             self.last_query = Instant::now();
 
             self.row_data.query(&self.db_manager, &self.sort_state);
+            log::info!("Refreshed data");
         }
 
         ctx.request_repaint_after(Duration::from_millis(100));
 
+
+        let mut has_row_data = false;
         let data = match &self.row_data.row_data {
             Some(d) => {
+                has_row_data = true;
                 self.apply_filters(d)
             },
             None => Vec::new(),
         };
+
+        if data.len() == 0 && has_row_data {
+            log::info!("After filters, there are no rows left, check if you have full server.sqlite3 with hand inputted data!");
+        }
 
 
         let old_column = self.sort_state.sort_column;
@@ -782,8 +757,17 @@ impl eframe::App for App {
 
         TopBottomPanel::top("main").show(ctx, |ui| {
            menu::bar(ui, |ui| {
+               if ui.add(
+                   TextEdit::singleline(&mut self.db_address)
+                       .hint_text("Naslov strežnika").desired_width(100.)
+               ).changed() {
+                   self.db_manager.update_url(self.db_address.as_str());
+                   self.config.update_url(self.db_address.as_str());
+               }
+
                if ui.button("Osveži").clicked() {
                    self.row_data.query(&self.db_manager, &self.sort_state);
+                   log::info!("Manually refreshed data");
                }
 
                ui.separator();
@@ -850,6 +834,7 @@ impl eframe::App for App {
 
                    self.sort_state = SortState::default();
                    self.row_data.query(&self.db_manager, &self.sort_state);
+                   log::info!("Refreshed data after filter reset");
                }
 
 
@@ -864,9 +849,9 @@ impl eframe::App for App {
            });
         });
 
-        let changed = render_choose_panel(ctx, &mut self.row_config);
+        let changed = render_choose_panel(ctx, &mut self.config);
         if changed {
-            self.row_config.save()
+            self.config.save()
         }
 
         CentralPanel::default().show(ctx, |ui| {
@@ -892,6 +877,7 @@ impl eframe::App for App {
 
         if old_sort != new_sort || old_column != new_column {
             self.row_data.query(&self.db_manager, &self.sort_state);
+            log::info!("Refreshed data due to old_sort != new_sort");
         }
     }
 

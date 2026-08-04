@@ -58,6 +58,7 @@ struct App {
     filter_nabavnik: String,
     filter_dobavitelj: String,
     filter_blagovna_skupina: String,
+    filter_lokacija: String,
 
     filter_zaloga_vecja: bool,
     filter_zaloga_gt: String,
@@ -164,6 +165,7 @@ impl App {
             filter_nabavnik: String::new(),
             filter_dobavitelj: String::new(),
             filter_blagovna_skupina: String::new(),
+            filter_lokacija: String::new(),
 
             filter_zaloga_vecja: false,
             filter_zaloga_gt: String::from("0"),
@@ -409,6 +411,8 @@ impl App {
 
                     row.blagovna_skupina.as_ref().unwrap_or(&String::new()).to_lowercase().contains(self.filter_blagovna_skupina.to_lowercase().as_str()) &&
 
+                    row.lokacija.as_ref().unwrap_or(&String::new()).to_lowercase().contains(self.filter_lokacija.to_lowercase().as_str()) &&
+
                     row.dobavitelji.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_dobavitelj.to_lowercase().as_str())) &&
                     condition &&
 
@@ -650,6 +654,11 @@ impl eframe::App for App {
                     TextEdit::singleline(&mut self.filter_blagovna_skupina)
                         .hint_text("Iskanje po blagovni skupini...")
                 );
+
+                ui.add(
+                    TextEdit::singleline(&mut self.filter_lokacija)
+                        .hint_text("Iskanje po lokaciji...")
+                );
             });
         });
 
@@ -799,6 +808,7 @@ impl eframe::App for App {
                    self.filter_zaloga_vecja = false;
                    self.filter_zaloga_gt = String::from("0");
                    self.filter_blagovna_skupina = String::new();
+                   self.filter_lokacija = String::new();
 
                    self.filter_poraba_vecja = false;
                    self.filter_poraba_gt = String::from("0");

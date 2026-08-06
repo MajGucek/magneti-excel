@@ -345,7 +345,7 @@ pub fn construct_body(field: ViewQueryFields,
         ViewQueryFields::MinimalnaZaloga => {
             table_row.col(|ui| {
                 let old = row_color;
-                if row.minimalna_zaloga.is_some_and(|val| val > (row.zaloga.unwrap_or(0.) + row.odprta_narocila.unwrap_or(0.)))  {
+                if row.minimalna_zaloga.is_some_and(|val| val > (row.razpolozljiva_zaloga.unwrap_or(0.) + row.odprta_narocila.unwrap_or(0.)))  {
                     // teal
                     row_color = TEAL;
                 }
@@ -391,7 +391,7 @@ pub fn construct_body(field: ViewQueryFields,
         ViewQueryFields::MaximalnaZaloga => {
             table_row.col(|ui| {
                 let old = row_color;
-                if row.maximalna_zaloga.is_some_and(|val| val < row.zaloga.unwrap_or(0.)) {
+                if row.maximalna_zaloga.is_some_and(|val| val < row.razpolozljiva_zaloga.unwrap_or(0.)) {
                     // indigo
                     row_color = INDIGO;
                 }

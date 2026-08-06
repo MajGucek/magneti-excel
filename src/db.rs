@@ -1048,7 +1048,7 @@ impl ViewQueryFields {
             ViewQueryFields::MinimalnaZaloga => {
                 table_row.col(|ui| {
                     let old = row_color;
-                    if row.minimalna_zaloga.is_some_and(|val| val > (row.zaloga.unwrap_or(0.) + row.odprta_narocila.unwrap_or(0.)))  {
+                    if row.minimalna_zaloga.is_some_and(|val| val > (row.razpolozljiva_zaloga.unwrap_or(0.) + row.odprta_narocila.unwrap_or(0.)))  {
                         // teal
                         row_color = TEAL;
                     }
@@ -1094,7 +1094,7 @@ impl ViewQueryFields {
             ViewQueryFields::MaximalnaZaloga => {
                 table_row.col(|ui| {
                     let old = row_color;
-                    if row.maximalna_zaloga.is_some_and(|val| val < row.zaloga.unwrap_or(0.)) {
+                    if row.maximalna_zaloga.is_some_and(|val| val < row.razpolozljiva_zaloga.unwrap_or(0.)) {
                         // indigo
                         row_color = INDIGO;
                     }
@@ -1168,7 +1168,7 @@ impl ViewQueryFields {
                     } else {
                         let mut label_text = row.blagovna_skupina.clone().unwrap_or(" ".repeat(30));
                         if label_text.is_empty() {
-                            label_text = " ".repeat(73);
+                            label_text = " ".repeat(1);
                         }
                         let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
                         if resp.double_clicked() {

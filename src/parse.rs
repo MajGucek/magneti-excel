@@ -102,7 +102,7 @@ pub fn parse_nabava_file(file: PathBuf) -> Result<Vec<NabavaData>, Box<dyn std::
         Err("Bad filename!")?;
     }
     let mut workbook = open_workbook_auto(file)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
     let mut nabava_rows: Vec<NabavaData> = Vec::with_capacity(1000);
     log::info!("Started parsing nabava");
     for row in range.rows().skip(1) {
@@ -148,7 +148,7 @@ pub fn parse_poraba_file(file: PathBuf) -> Result<Vec<PorabaData>, Box<dyn std::
         Err("Bad filename!")?;
     }
     let mut workbook = open_workbook_auto(file)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
     let mut poraba_rows: Vec<PorabaData> = Vec::with_capacity(1000);
     log::info!("Started parsing poraba");
     for row in range.rows().skip(1) {
@@ -198,7 +198,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
         path_buf.file_name().unwrap() == "PORABA.XLSX"
     }).ok_or("File PORABA.XLSX not found")?;
     let mut workbook = open_workbook_auto(poraba_file)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
     let mut poraba_map: HashMap<i64, Vec<(f64, NaiveDate)>> = HashMap::new();
     log::info!("Started parsing poraba");
     for row in range.rows().skip(1) {
@@ -235,7 +235,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
         path_buf.file_name().unwrap() == "ODPRTA NAROČILA.XLSX"
     }).ok_or("File ODPRTA_NAROČILA.XLSX not found")?;
     let mut workbook = open_workbook_auto(odprta_narocila_file)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
     let mut dobava_map: HashMap<i64, f64> = HashMap::new();
     log::info!("Started parsing odprta naročila");
     for row in range.rows().skip(1) {
@@ -263,7 +263,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
         path_buf.file_name().unwrap() == "ZALOGA.XLSX"
     }).ok_or("File ZALOGA.XLSX not found")?;
     let mut workbook = open_workbook_auto(zaloga_file)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
     let mut row_data: Vec<RowData> = Vec::with_capacity(100);
     let mut zaloga_map: HashMap<i64, f64> = HashMap::new();
     log::info!("Started parsing zaloga");
@@ -344,7 +344,21 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
 
 fn is_within_last_months(date: &NaiveDate, months: u32) -> bool {
     let today = Local::now().date_naive();
-    let cutoff = today.checked_sub_months(Months::new(months)).unwrap();
+    let cutoff = today
+        .checked_sub_months(Months::new(months))
+        .unwrap_or_else(|| {
+            let mut d = today;
+            loop {
+                if let Some(prev) = d.pred_opt() {
+                    d = prev;
+                    if d.checked_sub_months(Months::new(months)).is_some() {
+                        break d.checked_sub_months(Months::new(months)).unwrap();
+                    }
+                } else {
+                    break today;
+                }
+            }
+        });
 
     date >= &cutoff && date <= &today
 }
@@ -363,7 +377,7 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
     }
     let mut row_data = Vec::new();
     let mut workbook = open_workbook_auto(path)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
     log::info!("Started parsing sifrant");
     for row in range.rows().skip(1) {
         let material = row.get(0)
@@ -417,7 +431,7 @@ pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<d
     }
     let mut row_data = Vec::new();
     let mut workbook = open_workbook_auto(path)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
     let mut dobavitelji_map: HashMap<i64, Vec<String>> = HashMap::new();
     let mut cena_map: HashMap<i64, (f64, String)> = HashMap::new();
     log::info!("Started parsing dobavitelji");
@@ -494,7 +508,7 @@ pub fn parse_razpolozljiva_zaloga_file(path: PathBuf) -> Result<Vec<Razpolozljiv
     }
     let mut row_data = Vec::new();
     let mut workbook = open_workbook_auto(path)?;
-    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?).unwrap();
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
     let mut zaloga_100_map: HashMap<i64, (String, f64)> = HashMap::new();
     log::info!("Started parsing zaloga100");
     for row in range.rows().skip(1) {

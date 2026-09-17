@@ -432,10 +432,10 @@ impl App {
 
                 let condition = if self.filter_zaloga_vecja && self.filter_poraba_vecja {
                     // both are checked then OR
-                    row.zaloga.is_some_and(|zal| zal > parse_string_to_optional_f64(self.filter_zaloga_gt.as_str()).unwrap_or(0.)) ||
+                    row.razpolozljiva_zaloga.is_some_and(|zal| zal > parse_string_to_optional_f64(self.filter_zaloga_gt.as_str()).unwrap_or(0.)) ||
                         row.poraba_3m.is_some_and(|por| por > parse_string_to_optional_f64(self.filter_poraba_gt.as_str()).unwrap_or(0.))
                 } else if self.filter_zaloga_vecja && !self.filter_poraba_vecja {
-                    row.zaloga.is_some_and(|zal| zal > parse_string_to_optional_f64(self.filter_zaloga_gt.as_str()).unwrap_or(0.))
+                    row.razpolozljiva_zaloga.is_some_and(|zal| zal > parse_string_to_optional_f64(self.filter_zaloga_gt.as_str()).unwrap_or(0.))
                 } else if !self.filter_zaloga_vecja && self.filter_poraba_vecja {
                     row.poraba_3m.is_some_and(|por| por > parse_string_to_optional_f64(self.filter_poraba_gt.as_str()).unwrap_or(0.))
                 } else {

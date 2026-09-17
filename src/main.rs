@@ -5,6 +5,7 @@ mod parse;
 mod db;
 mod graph;
 
+use std::path::Path;
 use graph::*;
 
 use db::ViewQueryFields::*;
@@ -530,7 +531,7 @@ impl App {
                                 .rect_stroke(
                                     table_row.response().rect,
                                     CornerRadius::same(0),
-                                    Stroke::new(3.5, Color32::BLACK),
+                                    Stroke::new(3.5_f32, Color32::BLACK),
                                     StrokeKind::Outside
                                 );
                         }
@@ -804,16 +805,32 @@ impl eframe::App for App {
 
                ui.horizontal(|ui| {
                    if ui.button("Izvozi").clicked() {
-                       let mut resp: Result<(), Box<dyn std::error::Error>> = Ok(());
+                       if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                           let mut resp: Result<(), Box<dyn std::error::Error>> = Ok(());
 
-                       let _ = self.row_data.row_data.as_ref().map(|d| { resp = export_filtered_to_excel(&self.apply_filters(&d)); });
-                       match resp {
-                           Err(err) => {
-                               log::error!("export error: {:?}", err);
-                               MessageDialog::new().set_title("Napaka").set_description("Napaka pri izvozu").set_level(MessageLevel::Error).show();
-                           },
-                           Ok(_) => {
-                               MessageDialog::new().set_title("Uspeh").set_description("Uspešno izvozil").set_level(MessageLevel::Info).show();
+                           let _ = self.row_data.row_data.as_ref().map(|d| {
+                               resp = export_filtered_to_excel(
+                                   &self.apply_filters(&d),
+                                   &folder,
+                               );
+                           });
+
+                           match resp {
+                               Err(err) => {
+                                   log::error!("export error: {:?}", err);
+                                   MessageDialog::new()
+                                       .set_title("Napaka")
+                                       .set_description("Napaka pri izvozu")
+                                       .set_level(MessageLevel::Error)
+                                       .show();
+                               },
+                               Ok(_) => {
+                                   MessageDialog::new()
+                                       .set_title("Uspeh")
+                                       .set_description("Uspešno izvozil")
+                                       .set_level(MessageLevel::Info)
+                                       .show();
+                               }
                            }
                        }
                    }
@@ -951,6 +968,7 @@ impl eframe::App for App {
 
 pub fn export_filtered_to_excel(
     data: &[ViewQuery],
+    folder: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
@@ -1034,7 +1052,7 @@ pub fn export_filtered_to_excel(
 
     }
 
-    workbook.save("Analitika.xlsx")?;
+    workbook.save(folder.join("Analitika.xlsx"))?;
     Ok(())
 }
 

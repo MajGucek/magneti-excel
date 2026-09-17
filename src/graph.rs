@@ -110,7 +110,7 @@ impl PorabaNabavaRows {
                     pos2(plot_rect.left() + padding.x, y_pos),
                     pos2(plot_rect.right() - padding.x, y_pos)
                 ],
-                Stroke::new(0.5, Color32::from_gray(180)),
+                Stroke::new(0.5_f32, Color32::from_gray(180)),
             );
         }
 
@@ -121,7 +121,7 @@ impl PorabaNabavaRows {
                     pos2(x, plot_rect.top() + padding.y),
                     pos2(x, plot_rect.bottom() - padding.y)
                 ],
-                Stroke::new(0.3, Color32::from_gray(190)),
+                Stroke::new(0.3_f32, Color32::from_gray(190)),
             );
         }
 
@@ -180,7 +180,7 @@ impl PorabaNabavaRows {
                     rect,
                     0.0,
                     fill,
-                    Stroke::new(1.0, stroke_color),
+                    Stroke::new(1.0_f32, stroke_color),
                     StrokeKind::Inside,
                 );
             }
@@ -246,6 +246,7 @@ impl PorabaNabavaRows {
 
         if raw_data.is_empty() {
             self.clear();
+            return;
         }
 
         let month_data: Vec<((i32, u32), String, (f64, f64))> = raw_data

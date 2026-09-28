@@ -2,6 +2,7 @@
   "display_columns": [
     "Material",
     "NazivMateriala",
+    "DodatniNaziv",
     "RazpolozljivaZaloga",
     "Zaloga",
     "Poraba3M",
@@ -16,9 +17,11 @@
     "MinimalnaZaloga",
     "MaximalnaZaloga",
     "Pakiranje",
+    "ZaNarocilo",
     "Lokacija",
     "MRP",
     "BlagovnaSkupina",
+    "SBlagovnaSkupina",
     "Opomba",
     "NabavnaSkupina",
     "Dobavitelji"

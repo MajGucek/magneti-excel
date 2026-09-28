@@ -1,15 +1,20 @@
 use std::collections::{HashMap, HashSet};
-use std::ffi::{OsString};
 use std::ops::Neg;
 use std::path::PathBuf;
 use calamine::{open_workbook_auto, DataType, Reader};
 use chrono::{Local, Months, NaiveDate};
 use crate::db::DBManager;
 
+// windows doesn't care about case, so neither do we ("Šifrant.xlsx" == "ŠIFRANT.XLSX")
+fn upper_file_name(path: &PathBuf) -> String {
+    path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_uppercase()
+}
+
 pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<(), Box<dyn std::error::Error>> {
-    
+    log::info!("Selected files: {:?}", files.iter().map(|f| upper_file_name(f)).collect::<Vec<String>>());
+
     let sifrant_file = files.iter().filter(|file| {
-        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+        match upper_file_name(file).as_str() {
             "ŠIFRANT.XLSX" => true,
             _ => false,
         }
@@ -21,7 +26,7 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
     }).inspect_err(|e| log::error!("{}", e.to_string()));
 
     let dobavitelji_file = files.iter().filter(|file| {
-        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+        match upper_file_name(file).as_str() {
             "DOBAVITELJI.XLSX" => true,
             _ => false,
         }
@@ -33,7 +38,7 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
     }).inspect_err(|e| log::error!("{}", e.to_string()));
 
     let zaloga100_file = files.iter().filter(|file| {
-        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+        match upper_file_name(file).as_str() {
             "ZALOGA100.XLSX" => true,
             _ => false,
         }
@@ -46,7 +51,7 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
 
 
     let import_files = files.iter().filter(|file| {
-        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+        match upper_file_name(file).as_str() {
             "PORABA.XLSX" | "ODPRTA NAROČILA.XLSX" | "ZALOGA.XLSX" => true,
             _ => false,
         }
@@ -60,7 +65,7 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
 
 
     let poraba_file = files.iter().filter(|file| {
-        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+        match upper_file_name(file).as_str() {
             "PORABA.XLSX" => true,
             _ => false,
         }
@@ -72,7 +77,7 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
     }).inspect_err(|e| log::error!("{}", e.to_string()));
 
     let prevzemi_file = files.iter().filter(|file| {
-        match file.file_name().unwrap().to_ascii_uppercase().to_str().unwrap() {
+        match upper_file_name(file).as_str() {
             "NABAVA.XLSX" => true,
             _ => false,
         }
@@ -98,7 +103,7 @@ pub struct NabavaData {
 }
 
 pub fn parse_nabava_file(file: PathBuf) -> Result<Vec<NabavaData>, Box<dyn std::error::Error>> {
-    if !file.file_name().unwrap_or(OsString::default().as_os_str()).eq("NABAVA.XLSX") {
+    if !upper_file_name(&file).eq("NABAVA.XLSX") {
         Err("Bad filename!")?;
     }
     let mut workbook = open_workbook_auto(file)?;
@@ -144,7 +149,7 @@ pub struct PorabaData {
 }
 
 pub fn parse_poraba_file(file: PathBuf) -> Result<Vec<PorabaData>, Box<dyn std::error::Error>> {
-    if !file.file_name().unwrap_or(OsString::default().as_os_str()).eq("PORABA.XLSX") {
+    if !upper_file_name(&file).eq("PORABA.XLSX") {
         Err("Bad filename!")?;
     }
     let mut workbook = open_workbook_auto(file)?;
@@ -195,7 +200,7 @@ pub struct RowData {
 }
 pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
     let poraba_file = files.iter().find(|&path_buf| {
-        path_buf.file_name().unwrap() == "PORABA.XLSX"
+        upper_file_name(path_buf) == "PORABA.XLSX"
     }).ok_or("File PORABA.XLSX not found")?;
     let mut workbook = open_workbook_auto(poraba_file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
@@ -232,7 +237,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
     log::info!("Parsed poraba: {}", range.rows().len());
 
     let odprta_narocila_file = files.iter().find(|&path_buf| {
-        path_buf.file_name().unwrap() == "ODPRTA NAROČILA.XLSX"
+        upper_file_name(path_buf) == "ODPRTA NAROČILA.XLSX"
     }).ok_or("File ODPRTA_NAROČILA.XLSX not found")?;
     let mut workbook = open_workbook_auto(odprta_narocila_file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
@@ -260,7 +265,7 @@ pub fn parse_import_files(files: Vec<PathBuf>) -> Result<Vec<RowData>, Box<dyn s
 
 
     let zaloga_file = files.iter().find(|&path_buf| {
-        path_buf.file_name().unwrap() == "ZALOGA.XLSX"
+        upper_file_name(path_buf) == "ZALOGA.XLSX"
     }).ok_or("File ZALOGA.XLSX not found")?;
     let mut workbook = open_workbook_auto(zaloga_file)?;
     let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
@@ -370,9 +375,10 @@ pub struct SifrantRow {
     pub osnovna_merska_enota: String,
     pub nabavna_skupina: String,
     pub mrp_karakteristika: String,
+    pub s_blagovna_skupina: String,
 }
 pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std::error::Error>> {
-    if !path.file_name().unwrap_or(OsString::default().as_os_str()).eq("ŠIFRANT.XLSX") {
+    if !upper_file_name(&path).eq("ŠIFRANT.XLSX") {
         Err("Bad filename!")?;
     }
     let mut row_data = Vec::new();
@@ -389,6 +395,10 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
 
 
         let naziv_materiala = row.get(3)
+            .and_then(DataType::get_string)
+            .unwrap_or("").to_string();
+
+        let s_blagovna_skupina = row.get(6)
             .and_then(DataType::get_string)
             .unwrap_or("").to_string();
 
@@ -410,6 +420,7 @@ pub fn parse_sifrant_file(path: PathBuf) -> Result<Vec<SifrantRow>, Box<dyn std:
             osnovna_merska_enota,
             nabavna_skupina,
             mrp_karakteristika,
+            s_blagovna_skupina,
         });
     }
     log::info!("Parsed sifrant: {}", range.rows().len());
@@ -426,7 +437,7 @@ pub struct DobaviteljRow {
     pub valuta: String,
 }
 pub fn parse_dobavitelji_file(path: PathBuf) -> Result<Vec<DobaviteljRow>, Box<dyn std::error::Error>> {
-    if !path.file_name().unwrap_or(OsString::default().as_os_str()).eq("DOBAVITELJI.XLSX") {
+    if !upper_file_name(&path).eq("DOBAVITELJI.XLSX") {
         Err("Bad filename!")?;
     }
     let mut row_data = Vec::new();
@@ -503,7 +514,7 @@ pub struct RazpolozljivaZalogaRow {
     pub lokacija: String,
 }
 pub fn parse_razpolozljiva_zaloga_file(path: PathBuf) -> Result<Vec<RazpolozljivaZalogaRow>, Box<dyn std::error::Error>> {
-    if !path.file_name().unwrap_or(OsString::default().as_os_str()).eq("ZALOGA100.XLSX") {
+    if !upper_file_name(&path).eq("ZALOGA100.XLSX") {
         Err("Bad filename!")?;
     }
     let mut row_data = Vec::new();

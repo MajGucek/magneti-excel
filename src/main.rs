@@ -4,9 +4,11 @@
 mod parse;
 mod db;
 mod graph;
+mod images;
 
 use std::path::Path;
 use graph::*;
+use images::*;
 
 use db::ViewQueryFields::*;
 
@@ -42,6 +44,7 @@ struct App {
     sort_state: SortState,
 
     poraba_nabava_data: PorabaNabavaRows,
+    image_carousel: ImageCarousel,
 
     /* --Filters-- */
     filter_rdeca: bool,
@@ -102,6 +105,9 @@ struct App {
 
     editing_pakiranje_row: Option<usize>,
     edit_pakiranje_input: String,
+
+    editing_dodatni_naziv_row: Option<usize>,
+    edit_dodatni_naziv_input: String,
 }
 
 impl App {
@@ -113,6 +119,9 @@ impl App {
            s.override_text_style = Some(TextStyle::Heading);
             s.visuals.override_text_color = Some(Color32::from_rgb(5, 5, 5));
         });
+
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+        let _ = std::fs::create_dir_all("images");
 
         let mut row_data = None;
         let db_manager = DBManager { db_name: "server.sqlite3".to_string() };
@@ -143,6 +152,7 @@ impl App {
             row_config: RowConfig::load(),
             sort_state,
             poraba_nabava_data: PorabaNabavaRows::default(),
+            image_carousel: ImageCarousel::default(),
 
             filter_rdeca: false,
             filter_oranzna: false,
@@ -203,6 +213,9 @@ impl App {
             editing_pakiranje_row: None,
             edit_pakiranje_input: String::new(),
 
+            editing_dodatni_naziv_row: None,
+            edit_dodatni_naziv_input: String::new(),
+
         }
     }
 
@@ -235,6 +248,7 @@ impl RowConfig {
             display_columns: vec![
                 Material,
                 NazivMateriala,
+                DodatniNaziv,
                 RazpolozljivaZaloga,
                 Zaloga,
                 Poraba3M,
@@ -249,9 +263,11 @@ impl RowConfig {
                 MinimalnaZaloga,
                 MaximalnaZaloga,
                 Pakiranje,
+                ZaNarocilo,
                 Lokacija,
                 MRP,
                 BlagovnaSkupina,
+                SBlagovnaSkupina,
                 Opomba,
                 NabavnaSkupina,
                 Dobavitelji,
@@ -445,7 +461,9 @@ impl App {
 
 
                 format!("{}", row.material).contains(self.filter_sifra_materiala.as_str()) &&
-                    row.naziv_materiala.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_naziv_materiala.to_lowercase().as_str())) &&
+                    (row.naziv_materiala.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_naziv_materiala.to_lowercase().as_str())) ||
+                        row.dodatni_naziv.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_naziv_materiala.to_lowercase().as_str()))
+                    ) &&
 
                     (row.nabavna_skupina.as_ref().is_some_and(|a| format!("{}", a.to_lowercase()).contains(self.filter_nabavnik.to_lowercase().as_str())) ||
                         row.nabavna_skupina.as_ref().is_some_and(|a| format!("{}", format_nabavnik(a).unwrap_or(a).to_lowercase()).contains(self.filter_nabavnik.to_lowercase().as_str())
@@ -505,6 +523,7 @@ impl App {
                                 row,
                                 row_color,
                                 &mut self.poraba_nabava_data,
+                                &mut self.image_carousel,
                                 &self.db_manager,
                                 &mut self.sort_state,
                                 &mut self.row_data,
@@ -520,6 +539,8 @@ impl App {
                                 &mut self.edit_blagovna_skupina_input,
                                 &mut self.editing_opomba_row,
                                 &mut self.edit_opomba_input,
+                                &mut self.editing_dodatni_naziv_row,
+                                &mut self.edit_dodatni_naziv_input,
                             );
                         });
 
@@ -954,6 +975,17 @@ impl eframe::App for App {
             });
 
 
+        let mut images_hovered = false;
+        Area::new(Id::from("images"))
+            .anchor(Align2::RIGHT_BOTTOM, [-25., -25.])
+            .show(ctx, |ui| {
+                images_hovered = self.image_carousel.render(ui);
+                if ui.input(|i| i.pointer.any_pressed()) && !images_hovered && self.image_carousel.is_open() {
+                    self.image_carousel.clear(ctx);
+                }
+            });
+
+
         let new_column = self.sort_state.sort_column;
         let new_sort = self.sort_state.descending;
 
@@ -976,37 +1008,41 @@ pub fn export_filtered_to_excel(
 
     worksheet.write_string(0, 0, "Material")?;
     worksheet.write_string(0, 1, "Naziv")?;
-    worksheet.write_string(0, 2, "Zaloga 100")?;
-    worksheet.write_string(0, 3, "Zaloga Sum")?;
-    worksheet.write_string(0, 4, "Poraba 3M")?;
-    worksheet.insert_note(0, 4, &Note::new("Povprečna mesečna poraba za zadnje 3 mesece"))?;
+    worksheet.write_string(0, 2, "Dodatni naziv")?;
+    worksheet.write_string(0, 3, "Zaloga 100")?;
+    worksheet.write_string(0, 4, "Zaloga Sum")?;
+    worksheet.write_string(0, 5, "Poraba 3M")?;
+    worksheet.insert_note(0, 5, &Note::new("Povprečna mesečna poraba za zadnje 3 mesece"))?;
 
-    worksheet.write_string(0, 5, "Poraba 24M")?;
-    worksheet.insert_note(0, 5, &Note::new("Povprečna mesečna poraba za zadnjih 24 mesecev"))?;
+    worksheet.write_string(0, 6, "Poraba 24M")?;
+    worksheet.insert_note(0, 6, &Note::new("Povprečna mesečna poraba za zadnjih 24 mesecev"))?;
 
-    worksheet.write_string(0, 6, "Odprto")?;
-    worksheet.insert_note(0, 6, &Note::new("Odprta naročila dobaviteljem"))?;
+    worksheet.write_string(0, 7, "Odprto")?;
+    worksheet.insert_note(0, 7, &Note::new("Odprta naročila dobaviteljem"))?;
 
-    worksheet.write_string(0, 7, "Dobava")?;
-    worksheet.insert_note(0, 7, &Note::new("Predviden dobavni rok v mesecih"))?;
+    worksheet.write_string(0, 8, "Dobava")?;
+    worksheet.insert_note(0, 8, &Note::new("Predviden dobavni rok v mesecih"))?;
 
-    worksheet.write_string(0, 8, "Zaloga SAP")?;
-    worksheet.insert_note(0, 8, &Note::new("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"))?;
+    worksheet.write_string(0, 9, "Zaloga SAP")?;
+    worksheet.insert_note(0, 9, &Note::new("Trenutna zaloga v SAP-u, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"))?;
 
-    worksheet.write_string(0, 9, "Zaloga Sum SAP")?;
-    worksheet.insert_note(0, 9, &Note::new("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"))?;
-    worksheet.write_string(0, 10, "Cena")?;
-    worksheet.write_string(0, 11, "Valuta")?;
-    worksheet.write_string(0, 12, "Enota")?;
-    worksheet.write_string(0, 13, "Minimalna Zaloga")?;
-    worksheet.write_string(0, 14, "Maximalna Zaloga")?;
-    worksheet.write_string(0, 15, "Pakiranje")?;
-    worksheet.write_string(0, 16, "Lokacija")?;
-    worksheet.write_string(0, 17, "MRP")?;
-    worksheet.write_string(0, 18, "Blagovna Skupina")?;
-    worksheet.write_string(0, 19, "Opomba")?;
-    worksheet.write_string(0, 20, "Nabavnik")?;
-    worksheet.write_string(0, 21, "Dobavitelji")?;
+    worksheet.write_string(0, 10, "Zaloga Sum SAP")?;
+    worksheet.insert_note(0, 10, &Note::new("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"))?;
+    worksheet.write_string(0, 11, "Cena")?;
+    worksheet.write_string(0, 12, "Valuta")?;
+    worksheet.write_string(0, 13, "Enota")?;
+    worksheet.write_string(0, 14, "Minimalna Zaloga")?;
+    worksheet.write_string(0, 15, "Maximalna Zaloga")?;
+    worksheet.write_string(0, 16, "Pakiranje")?;
+    worksheet.write_string(0, 17, "Za naročilo")?;
+    worksheet.insert_note(0, 17, &Note::new("Min zaloga - (Zaloga 100 + Odprto), zaokroženo navzgor na cela pakiranja (npr. 11 pri pakiranju 4 -> 12)"))?;
+    worksheet.write_string(0, 18, "Lokacija")?;
+    worksheet.write_string(0, 19, "MRP")?;
+    worksheet.write_string(0, 20, "Blagovna Skupina")?;
+    worksheet.write_string(0, 21, "Blagovna Skupina SAP")?;
+    worksheet.write_string(0, 22, "Opomba")?;
+    worksheet.write_string(0, 23, "Nabavnik")?;
+    worksheet.write_string(0, 24, "Dobavitelji")?;
 
     fn round_f64(value: f64, precision: u32) -> f64 {
         let factor = 10_f64.powi(precision as i32);
@@ -1029,26 +1065,32 @@ pub fn export_filtered_to_excel(
         let empty = String::new();
         worksheet.write_number_with_format(row, 0, item.material as f64, &format)?;
         worksheet.write_string_with_format(row, 1, item.naziv_materiala.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_number_with_format(row, 2, round_f64(item.razpolozljiva_zaloga.unwrap_or(0.), 1), &format)?;
-        worksheet.write_number_with_format(row, 3, round_f64(item.zaloga.unwrap_or(0.), 1), &format)?;
-        worksheet.write_number_with_format(row, 4, round_f64(item.poraba_3m.unwrap_or(0.), 1), &format)?;
-        worksheet.write_number_with_format(row, 5, round_f64(item.poraba_24m.unwrap_or(0.), 1), &format)?;
-        worksheet.write_number_with_format(row, 6, round_f64(item.odprta_narocila.unwrap_or(0.),0), &format)?;
-        worksheet.write_number_with_format(row, 7, round_f64(item.dobavni_rok.unwrap_or(0.), 1), &format)?;
-        worksheet.write_number_with_format(row, 8, round_f64(item.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.), 1), &format)?;
-        worksheet.write_number_with_format(row, 9, round_f64(item.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.), 1), &format)?;
-        worksheet.write_number_with_format(row, 10, round_f64(item.cena.unwrap_or(0.), 1), &format)?;
-        worksheet.write_string_with_format(row, 11, item.valuta.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 12, item.osnovna_merska_enota.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_number_with_format(row, 13, round_f64(item.minimalna_zaloga.unwrap_or(0.), 0), &format)?;
-        worksheet.write_number_with_format(row, 14, round_f64(item.maximalna_zaloga.unwrap_or(0.), 0), &format)?;
-        worksheet.write_string_with_format(row, 15, item.pakiranje.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 16, item.lokacija.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 17, item.mrp_karakteristika.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 18, item.blagovna_skupina.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 19, item.opomba.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 20, item.nabavna_skupina.as_ref().unwrap_or(&empty), &format)?;
-        worksheet.write_string_with_format(row, 21, item.dobavitelji.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 2, item.dodatni_naziv.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_number_with_format(row, 3, round_f64(item.razpolozljiva_zaloga.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 4, round_f64(item.zaloga.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 5, round_f64(item.poraba_3m.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 6, round_f64(item.poraba_24m.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 7, round_f64(item.odprta_narocila.unwrap_or(0.),0), &format)?;
+        worksheet.write_number_with_format(row, 8, round_f64(item.dobavni_rok.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 9, round_f64(item.trenutna_zaloga_zadostuje_za_mesecev.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 10, round_f64(item.trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev.unwrap_or(0.), 1), &format)?;
+        worksheet.write_number_with_format(row, 11, round_f64(item.cena.unwrap_or(0.), 1), &format)?;
+        worksheet.write_string_with_format(row, 12, item.valuta.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 13, item.osnovna_merska_enota.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_number_with_format(row, 14, round_f64(item.minimalna_zaloga.unwrap_or(0.), 0), &format)?;
+        worksheet.write_number_with_format(row, 15, round_f64(item.maximalna_zaloga.unwrap_or(0.), 0), &format)?;
+        worksheet.write_string_with_format(row, 16, item.pakiranje.as_ref().unwrap_or(&empty), &format)?;
+        // empty cell means nothing to order, 0 would look like "order 0"
+        if let Some(za_narocilo) = item.za_narocilo {
+            worksheet.write_number_with_format(row, 17, round_f64(za_narocilo, 0), &format)?;
+        }
+        worksheet.write_string_with_format(row, 18, item.lokacija.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 19, item.mrp_karakteristika.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 20, item.blagovna_skupina.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 21, item.s_blagovna_skupina.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 22, item.opomba.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 23, item.nabavna_skupina.as_ref().unwrap_or(&empty), &format)?;
+        worksheet.write_string_with_format(row, 24, item.dobavitelji.as_ref().unwrap_or(&empty), &format)?;
 
     }
 

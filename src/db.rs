@@ -5,6 +5,7 @@ use sqlite::{Connection, State};
 use serde::{Deserialize, Serialize};
 use crate::{format_nabavnik, format_number_custom, parse_string_to_optional_f64, Rows, INDIGO, RED, TEAL};
 use crate::graph::PorabaNabavaRows;
+use crate::images::ImageCarousel;
 use crate::parse::{DobaviteljRow, NabavaData, PorabaData, RowData, SifrantRow, RazpolozljivaZalogaRow};
 
 pub struct DBManager {
@@ -27,6 +28,7 @@ impl DBManager {
         self.create_max_zaloga_table(&connection)?;
         self.create_blagovna_skupina_table(&connection)?;
         self.create_pakiranje_table(&connection)?;
+        self.create_dodatni_naziv_table(&connection)?;
 
         Ok(())
     }
@@ -337,10 +339,13 @@ impl DBManager {
                 naziv_materiala TEXT,
                 osnovna_merska_enota TEXT,
                 nabavna_skupina TEXT,
-                mrp_karakteristika TEXT
+                mrp_karakteristika TEXT,
+                s_blagovna_skupina TEXT
             );
         ")?;
         connection.execute("COMMIT")?;
+        // old db has sifrant without it, fails if column already exists
+        let _ = connection.execute("ALTER TABLE sifrant ADD COLUMN s_blagovna_skupina TEXT;");
         log::info!("Created sifrant table");
         Ok(())
     }
@@ -351,7 +356,7 @@ impl DBManager {
         self.create_sifrant_table(&connection)?;
 
         let mut statement = connection.prepare("
-            INSERT INTO sifrant (material, naziv_materiala, osnovna_merska_enota, nabavna_skupina, mrp_karakteristika) VALUES (?, ?, ?, ?, ?)
+            INSERT INTO sifrant (material, naziv_materiala, osnovna_merska_enota, nabavna_skupina, mrp_karakteristika, s_blagovna_skupina) VALUES (?, ?, ?, ?, ?, ?)
         ")?;
 
         connection.execute("BEGIN TRANSACTION")?;
@@ -362,6 +367,7 @@ impl DBManager {
             statement.bind(&[(3, sifrant_row.osnovna_merska_enota.as_str())][..])?;
             statement.bind(&[(4, sifrant_row.nabavna_skupina.as_str())][..])?;
             statement.bind(&[(5, sifrant_row.mrp_karakteristika.as_str())][..])?;
+            statement.bind(&[(6, sifrant_row.s_blagovna_skupina.as_str())][..])?;
             statement.next()?;
             statement.reset()?;
         }
@@ -399,6 +405,36 @@ impl DBManager {
         statement.next()?;
         connection.execute("COMMIT")?;
         log::info!("Stored to pakiranja table");
+        Ok(())
+    }
+
+    fn create_dodatni_naziv_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS dodatni_nazivi (
+                material INTEGER PRIMARY KEY ,
+                dodatni_naziv TEXT NOT NULL
+            );
+        ")?;
+
+        connection.execute("COMMIT")?;
+        log::info!("Created dodatni_nazivi table");
+        Ok(())
+    }
+
+    pub fn store_dodatni_naziv(&self, dodatni_naziv: (i64, String)) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        self.create_dodatni_naziv_table(&connection)?;
+
+        let mut statement = connection.prepare("
+            INSERT INTO dodatni_nazivi (material, dodatni_naziv) VALUES (?, ?) ON CONFLICT(material) DO UPDATE SET dodatni_naziv = excluded.dodatni_naziv
+        ")?;
+        connection.execute("BEGIN TRANSACTION")?;
+        statement.bind((1, dodatni_naziv.0))?;
+        statement.bind((2, dodatni_naziv.1.as_str()))?;
+        statement.next()?;
+        connection.execute("COMMIT")?;
+        log::info!("Stored to dodatni_nazivi table");
         Ok(())
     }
 
@@ -563,6 +599,9 @@ impl DBManager {
     pub fn try_drop_view(&self) -> Result<(), Box<dyn std::error::Error>> {
         let connection = sqlite::open(self.db_name.as_str())?;
         connection.execute("
+            DROP VIEW IF EXISTS view_za_narocilo;
+        ")?;
+        connection.execute("
             DROP VIEW view_podatki;
         ")?;
         Ok(())
@@ -571,6 +610,39 @@ impl DBManager {
     pub fn try_create_view(&self) -> Result<(), Box<dyn std::error::Error>> {
         log::info!("trying to create view");
         let connection = sqlite::open(self.db_name.as_str())?;
+
+        // ZA NAROCILO:
+        // manjka = MIN ZALOGA - (ZALOGA100 ?? 0 + ODPRTO ?? 0), skip if no min zaloga
+        // if manjka >= 0 -> manjka filled up to whole packages of PAKIRANJE ?? 1 (11 with pak 4 -> 12), else NULL
+        // pakiranje is TEXT so "12 kos" -> 12, "0,5" -> 0.5, "" -> 1
+        // no CEIL in sqlite without math functions so int + (x > int)
+        connection.execute("
+            CREATE VIEW IF NOT EXISTS view_za_narocilo AS
+            SELECT
+                material,
+                (
+                    CAST(ROUND(manjka / pakiranje, 6) AS INTEGER) +
+                    (ROUND(manjka / pakiranje, 6) > CAST(ROUND(manjka / pakiranje, 6) AS INTEGER))
+                ) * pakiranje AS za_narocilo
+            FROM (
+                SELECT
+                    min_z.material,
+                    ROUND(min_z.minimalna_zaloga - (COALESCE(razp_zal.razpolozljiva_zaloga, 0) + COALESCE(d.odprta_narocila, 0)), 6) AS manjka,
+                    CASE
+                        WHEN CAST(REPLACE(pak.pakiranje, ',', '.') AS REAL) > 0 THEN CAST(REPLACE(pak.pakiranje, ',', '.') AS REAL)
+                        ELSE 1.0
+                    END AS pakiranje
+                FROM minimalne_zaloge min_z
+                LEFT JOIN data d ON min_z.material = d.material
+                LEFT JOIN razpolozljive_zaloge razp_zal ON min_z.material = razp_zal.material
+                LEFT JOIN pakiranja pak ON min_z.material = pak.material
+                WHERE min_z.minimalna_zaloga IS NOT NULL
+            )
+            WHERE manjka >= 0
+            ;
+        ")?;
+        log::info!("Created za_narocilo View");
+
         connection.execute("
             CREATE VIEW IF NOT EXISTS view_podatki AS
             SELECT
@@ -595,7 +667,10 @@ impl DBManager {
                 max_z.maximalna_zaloga,
                 blag_s.blagovna_skupina,
                 pak.pakiranje,
-                o.opomba
+                o.opomba,
+                dod_n.dodatni_naziv,
+                za_n.za_narocilo,
+                s.s_blagovna_skupina
             FROM sifrant s
             LEFT JOIN data d ON s.material = d.material
             LEFT JOIN dobavni_roki c ON s.material = c.material
@@ -612,6 +687,8 @@ impl DBManager {
             LEFT JOIN maximalne_zaloge max_z ON s.material = max_z.material
             LEFT JOIN blagovne_skupine blag_s ON s.material = blag_s.material
             LEFT JOIN pakiranja pak ON s.material = pak.material
+            LEFT JOIN dodatni_nazivi dod_n ON s.material = dod_n.material
+            LEFT JOIN view_za_narocilo za_n ON s.material = za_n.material
             ;
         ")?;
         log::info!("Created View");
@@ -717,6 +794,9 @@ pub struct ViewQuery {
     pub blagovna_skupina: Option<String>,
     pub pakiranje: Option<String>,
     pub opomba: Option<String>,
+    pub dodatni_naziv: Option<String>,
+    pub za_narocilo: Option<f64>,
+    pub s_blagovna_skupina: Option<String>,
 }
 
 
@@ -752,6 +832,9 @@ impl ViewQuery {
             row.blagovna_skupina = statement.read(19)?;
             row.pakiranje = statement.read(20)?;
             row.opomba = statement.read(21)?;
+            row.dodatni_naziv = statement.read(22)?;
+            row.za_narocilo = statement.read(23)?;
+            row.s_blagovna_skupina = statement.read(24)?;
             rows.push(row);
         }
 
@@ -786,6 +869,9 @@ pub enum ViewQueryFields {
     BlagovnaSkupina,
     Pakiranje,
     Opomba,
+    DodatniNaziv,
+    ZaNarocilo,
+    SBlagovnaSkupina,
 }
 
 impl std::fmt::Display for ViewQueryFields {
@@ -803,7 +889,7 @@ impl std::fmt::Display for ViewQueryFields {
 }
 
 impl ViewQueryFields {
-    pub const ALL: [ViewQueryFields; 22] = [
+    pub const ALL: [ViewQueryFields; 25] = [
         ViewQueryFields::Material,
         ViewQueryFields::NazivMateriala,
         ViewQueryFields::OsnovnaMerskaEnota,
@@ -826,6 +912,9 @@ impl ViewQueryFields {
         ViewQueryFields::BlagovnaSkupina,
         ViewQueryFields::Pakiranje,
         ViewQueryFields::Opomba,
+        ViewQueryFields::DodatniNaziv,
+        ViewQueryFields::ZaNarocilo,
+        ViewQueryFields::SBlagovnaSkupina,
     ];
     pub fn construct_headers(&self, header: &mut egui_extras::TableRow, sort: &mut ViewQueryFields) {
         match self {
@@ -851,6 +940,9 @@ impl ViewQueryFields {
             ViewQueryFields::Pakiranje => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Pakiranje, "Pakiranje"); });},
             ViewQueryFields::Lokacija => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Lokacija, "Lokacija"); });},
             ViewQueryFields::Opomba => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Opomba, "Opomba"); });},
+            ViewQueryFields::DodatniNaziv => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::DodatniNaziv, "Dodatni naziv"); });},
+            ViewQueryFields::SBlagovnaSkupina => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::SBlagovnaSkupina, "Blagovna skupina SAP").on_hover_text("Blagovna skupina iz šifranta"); });},
+            ViewQueryFields::ZaNarocilo => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::ZaNarocilo, "Za naročilo").on_hover_text("Min zaloga - (Zaloga 100 + Odprto), zaokroženo navzgor na cela pakiranja (npr. 11 pri pakiranju 4 -> 12)"); });},
         }
     }
     pub fn construct_body(&self,
@@ -859,6 +951,7 @@ impl ViewQueryFields {
                           row: &ViewQuery,
                           mut row_color: Color32,
                           poraba_nabava_data: &mut PorabaNabavaRows,
+                          image_carousel: &mut ImageCarousel,
                           db_manager: &DBManager,
                           sort_state: &SortState,
                           row_data: &mut Rows,
@@ -874,6 +967,8 @@ impl ViewQueryFields {
                           edit_blagovna_skupina_input: &mut String,
                           editing_opomba_row: &mut Option<usize>,
                           edit_opomba_input: &mut String,
+                          editing_dodatni_naziv_row: &mut Option<usize>,
+                          edit_dodatni_naziv_input: &mut String,
     ) {
         match self {
             ViewQueryFields::Material => {
@@ -890,7 +985,12 @@ impl ViewQueryFields {
             ViewQueryFields::NazivMateriala => {
                 table_row.col(|ui| {
                     ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
-                    ui.label(row.naziv_materiala.clone().unwrap_or_else(|| "".to_string()));
+                    if ui.label(RichText::new(row.naziv_materiala.clone().unwrap_or_else(|| "".to_string())).underline().background_color(Color32::TRANSPARENT))
+                        .on_hover_cursor(CursorIcon::PointingHand)
+                        .clicked() {
+
+                        image_carousel.query(row.material, row.naziv_materiala.as_ref().unwrap_or(&"".to_string()).as_str());
+                    }
                 });
             }
             ViewQueryFields::OsnovnaMerskaEnota => {
@@ -1261,6 +1361,60 @@ impl ViewQueryFields {
                     }
                 });
             }
+            ViewQueryFields::DodatniNaziv => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+
+                    if *editing_dodatni_naziv_row == Some(index) {
+                        let response = ui.text_edit_singleline(edit_dodatni_naziv_input);
+                        if response.lost_focus() {
+                            *editing_dodatni_naziv_row = None;
+
+                            let os_resp = MessageDialog::new()
+                                .set_title("Potrdi vnos")
+                                .set_level(MessageLevel::Info)
+                                .set_buttons(MessageButtons::OkCancel)
+                                .show();
+
+                            match os_resp {
+                                MessageDialogResult::Ok => {
+                                    let _ = db_manager.store_dodatni_naziv((
+                                                                                    row.material,
+                                                                                    edit_dodatni_naziv_input.clone()),
+                                    );
+                                    row_data.query(db_manager, sort_state);
+                                },
+                                _ => {}
+                            }
+                        }
+
+                    } else {
+                        let mut label_text = row.dodatni_naziv.clone().unwrap_or_else(|| " ".repeat(40));
+                        if label_text.is_empty() {
+                            label_text = " ".repeat(40);
+                        }
+                        let resp = ui.label(label_text.clone()).on_hover_cursor(CursorIcon::Help);
+                        if resp.double_clicked() {
+                            *editing_dodatni_naziv_row = Some(index);
+                            *edit_dodatni_naziv_input = row.dodatni_naziv.clone().unwrap_or(String::new());
+                        }
+
+                    }
+                });
+            }
+            ViewQueryFields::ZaNarocilo => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    ui.label(row.za_narocilo.map_or("".to_string(), |v| format_number_custom(v, 0)));
+                });
+            }
+            ViewQueryFields::SBlagovnaSkupina => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    let t = row.s_blagovna_skupina.clone().unwrap_or_else(|| "".to_string());
+                    ui.label(&t);
+                });
+            }
         }
     }
     pub(crate) fn as_str(&self) -> &'static str {
@@ -1287,6 +1441,9 @@ impl ViewQueryFields {
             ViewQueryFields::Pakiranje => "pakiranje",
             ViewQueryFields::Lokacija => "lokacija",
             ViewQueryFields::Opomba => "opomba",
+            ViewQueryFields::DodatniNaziv => "dodatni_naziv",
+            ViewQueryFields::ZaNarocilo => "za_narocilo",
+            ViewQueryFields::SBlagovnaSkupina => "s_blagovna_skupina",
         }
     }
 }

@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 eframe = "0.33.3"
 egui_extras = { version = "0.33.3", features = ["file", "image"] }
+# not used directly in code, but it turns on the jpg/bmp/webp decoders for egui image loader (without it only png works)
+image = { version = "0.25.6", default-features = false, features = ["jpeg", "png", "bmp", "webp"] }
 
 rfd = "0.17.2"
 calamine = "0.33.0"

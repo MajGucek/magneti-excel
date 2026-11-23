@@ -87,7 +87,19 @@ pub fn parse_all_files(files: Vec<PathBuf>, db_manager: &DBManager) -> Result<()
         log::info!("Finished parsing prevzemi file");
         db_manager.store_nabava_to_db(row_data)
     }).inspect_err(|e| log::error!("{}", e.to_string()));
-    
+
+    let cena_p_file = files.iter().filter(|file| {
+        match upper_file_name(file).as_str() {
+            "NABAVA.XLSX" => true,
+            _ => false,
+        }
+    }).cloned().take(1).collect::<PathBuf>();
+    log::info!("Started parsing cena p file");
+    let _ = parse_cena_p_file(cena_p_file).and_then(|rows| {
+        log::info!("Finished parsing cena p file");
+        db_manager.store_cene_p_to_db(rows)
+    }).inspect_err(|e| log::error!("{}", e.to_string()));
+
     db_manager.try_create_view()?;
 
 
@@ -140,6 +152,68 @@ pub fn parse_nabava_file(file: PathBuf) -> Result<Vec<NabavaData>, Box<dyn std::
     log::info!("Parsed nabava: {}", range.rows().len());
 
     Ok(nabava_rows)
+}
+
+
+#[derive(Default)]
+pub struct CenaPRow {
+    pub material: i64,
+    pub cena_p: f64,
+}
+// cena p = Znes.v dom.val. / Klč v EM vnosa from the row with the newest Datum knjiženja
+pub fn parse_cena_p_file(path: PathBuf) -> Result<Vec<CenaPRow>, Box<dyn std::error::Error>> {
+    if !upper_file_name(&path).eq("NABAVA.XLSX") {
+        Err("Bad filename!")?;
+    }
+    let mut row_data = Vec::new();
+    let mut workbook = open_workbook_auto(path)?;
+    let range= workbook.worksheet_range(workbook.sheet_names().get(0).ok_or("Workbook has no sheets")?)?;
+    let mut zadnja_nabava_map: HashMap<i64, (NaiveDate, f64, f64)> = HashMap::new();
+    log::info!("Started parsing cena p");
+    for row in range.rows().skip(1) {
+        let material = row.get(1)
+            .and_then(DataType::get_string)
+            .map(|f| f.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0);
+        if material == 0 { continue; }
+
+        let date = row.get(8)
+            .and_then(DataType::get_datetime)
+            .map(|date| {
+                let  (y, m, d, _, _, _, _) = date.to_ymd_hms_milli();
+                NaiveDate::from_ymd_opt(y as i32, m as u32, d as u32).unwrap_or(NaiveDate::default())
+            })
+            .unwrap_or(NaiveDate::default());
+
+        let kolicina = row.get(9)
+            .and_then(DataType::get_float)
+            .unwrap_or(0.);
+
+        let znesek = row.get(11)
+            .and_then(DataType::get_float)
+            .unwrap_or(0.);
+
+        // only a strictly newer date replaces, so on the same date the first row stays
+        let is_newer = zadnja_nabava_map.get(&material).map_or(true, |(zadnji_datum, _, _)| date > *zadnji_datum);
+        if is_newer {
+            zadnja_nabava_map.insert(material, (date, kolicina, znesek));
+        }
+    }
+
+    zadnja_nabava_map.into_iter().for_each(|(material, (_, kolicina, znesek))| {
+        if kolicina == 0. {
+            log::warn!("Klč v EM vnosa == 0. for material {}!", material);
+            return;
+        }
+        row_data.push(CenaPRow {
+            material,
+            cena_p: znesek / kolicina,
+        })
+    });
+
+    log::info!("Parsed cena p: {}", range.rows().len());
+
+    Ok(row_data)
 }
 
 pub struct PorabaData {

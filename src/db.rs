@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{format_nabavnik, format_number_custom, parse_string_to_optional_f64, Rows, INDIGO, RED, TEAL};
 use crate::graph::PorabaNabavaRows;
 use crate::images::ImageCarousel;
-use crate::parse::{DobaviteljRow, NabavaData, PorabaData, RowData, SifrantRow, RazpolozljivaZalogaRow};
+use crate::parse::{CenaPRow, DobaviteljRow, NabavaData, PorabaData, RowData, SifrantRow, RazpolozljivaZalogaRow};
 
 pub struct DBManager {
     pub db_name: String
@@ -21,6 +21,7 @@ impl DBManager {
         self.create_nabava_table(&connection)?;
         self.create_dobavitelji_table(&connection)?;
         self.create_razpolozljive_zaloge_table(&connection)?;
+        self.create_cene_p_table(&connection)?;
 
         self.create_dobavni_rok_table(&connection)?;
         self.create_opomba_table(&connection)?;
@@ -149,6 +150,16 @@ impl DBManager {
         Ok(())
     }
 
+    pub fn drop_cene_p(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("DROP TABLE cene_p;")?;
+        connection.execute("COMMIT")?;
+        log::info!("Dropped cene_p");
+
+        Ok(())
+    }
+
 
 
     pub fn store_to_data(&self, row_data: Vec<RowData>) -> Result<(), Box<dyn std::error::Error>> {
@@ -249,6 +260,42 @@ impl DBManager {
         }
         connection.execute("COMMIT")?;
         log::info!("Stored to table Nabave: {}", rows.len());
+        Ok(())
+    }
+
+    fn create_cene_p_table(&self, connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        connection.execute("BEGIN TRANSACTION")?;
+        connection.execute("
+            CREATE TABLE IF NOT EXISTS cene_p (
+                id INTEGER PRIMARY KEY,
+                material INTEGER NOT NULL,
+                cena_p REAL
+            );
+        ")?;
+        connection.execute("COMMIT")?;
+        log::info!("Created cene_p table");
+        Ok(())
+    }
+
+    pub fn store_cene_p_to_db(&self, rows: Vec<CenaPRow>) -> Result<(), Box<dyn std::error::Error>> {
+        let connection = sqlite::open(self.db_name.as_str())?;
+        let _ = self.drop_cene_p();
+        self.create_cene_p_table(&connection)?;
+
+        let mut statement = connection.prepare("
+            INSERT INTO cene_p (material, cena_p) VALUES (?, ?)
+        ")?;
+
+        connection.execute("BEGIN TRANSACTION")?;
+        log::info!("Started inserting into cene_p");
+        for cena_p_row in rows.iter() {
+            statement.bind((1, cena_p_row.material))?;
+            statement.bind((2, cena_p_row.cena_p))?;
+            statement.next()?;
+            statement.reset()?;
+        }
+        connection.execute("COMMIT")?;
+        log::info!("Stored to table Cene P: {}", rows.len());
         Ok(())
     }
 
@@ -670,7 +717,8 @@ impl DBManager {
                 o.opomba,
                 dod_n.dodatni_naziv,
                 za_n.za_narocilo,
-                s.s_blagovna_skupina
+                s.s_blagovna_skupina,
+                cp.cena_p
             FROM sifrant s
             LEFT JOIN data d ON s.material = d.material
             LEFT JOIN dobavni_roki c ON s.material = c.material
@@ -689,6 +737,7 @@ impl DBManager {
             LEFT JOIN pakiranja pak ON s.material = pak.material
             LEFT JOIN dodatni_nazivi dod_n ON s.material = dod_n.material
             LEFT JOIN view_za_narocilo za_n ON s.material = za_n.material
+            LEFT JOIN cene_p cp ON s.material = cp.material
             ;
         ")?;
         log::info!("Created View");
@@ -797,6 +846,7 @@ pub struct ViewQuery {
     pub dodatni_naziv: Option<String>,
     pub za_narocilo: Option<f64>,
     pub s_blagovna_skupina: Option<String>,
+    pub cena_p: Option<f64>,
 }
 
 
@@ -835,6 +885,7 @@ impl ViewQuery {
             row.dodatni_naziv = statement.read(22)?;
             row.za_narocilo = statement.read(23)?;
             row.s_blagovna_skupina = statement.read(24)?;
+            row.cena_p = statement.read(25)?;
             rows.push(row);
         }
 
@@ -861,6 +912,7 @@ pub enum ViewQueryFields {
     TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev,
     Dobavitelji,
     Cena,
+    CenaP,
     Valuta,
     RazpolozljivaZaloga,
     Lokacija,
@@ -889,7 +941,7 @@ impl std::fmt::Display for ViewQueryFields {
 }
 
 impl ViewQueryFields {
-    pub const ALL: [ViewQueryFields; 25] = [
+    pub const ALL: [ViewQueryFields; 26] = [
         ViewQueryFields::Material,
         ViewQueryFields::NazivMateriala,
         ViewQueryFields::OsnovnaMerskaEnota,
@@ -904,6 +956,7 @@ impl ViewQueryFields {
         ViewQueryFields::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev,
         ViewQueryFields::Dobavitelji,
         ViewQueryFields::Cena,
+        ViewQueryFields::CenaP,
         ViewQueryFields::Valuta,
         ViewQueryFields::RazpolozljivaZaloga,
         ViewQueryFields::Lokacija,
@@ -932,6 +985,7 @@ impl ViewQueryFields {
             ViewQueryFields::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev, "Zaloga Sum SAP").on_hover_text("Seštevek trenutne zaloge v SAP-u in odprtih naročil, ki zadostuje za X mesecev na osnovi povprečne porabe preteklih 3 mesecev, če artikel nima 3M porabe računa na osnovi 24M porabe"); });},
             ViewQueryFields::Dobavitelji => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Dobavitelji, "Dobavitelji"); });},
             ViewQueryFields::Cena => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Cena, "Cena"); });},
+            ViewQueryFields::CenaP => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::CenaP, "Cena P").on_hover_text("Znesek / količina zadnje nabave"); });},
             ViewQueryFields::Valuta => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::Valuta, "Valuta"); });},
             ViewQueryFields::RazpolozljivaZaloga => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::RazpolozljivaZaloga, "Zaloga 100"); });},
             ViewQueryFields::MinimalnaZaloga => {header.col(|ui| {ui.radio_value(sort, ViewQueryFields::MinimalnaZaloga, "Min zaloga"); });},
@@ -1124,6 +1178,12 @@ impl ViewQueryFields {
                     ui.label(row.cena.map_or("".to_string(), |v| format_number_custom(v, 2)));
                 });
 
+            }
+            ViewQueryFields::CenaP => {
+                table_row.col(|ui| {
+                    ui.painter().rect_filled(ui.max_rect(), CornerRadius::same(0), row_color);
+                    ui.label(row.cena_p.map_or("".to_string(), |v| format_number_custom(v, 2)));
+                });
             }
             ViewQueryFields::Valuta => {
                 table_row.col(|ui| {
@@ -1433,6 +1493,7 @@ impl ViewQueryFields {
             ViewQueryFields::TrenutnaZalogaInOdprtaNarocilaZadostujeZaMesecev => "trenutna_zaloga_in_odprta_narocila_zadostuje_za_mesecev",
             ViewQueryFields::Dobavitelji => "dobavitelji",
             ViewQueryFields::Cena => "cena",
+            ViewQueryFields::CenaP => "cena_p",
             ViewQueryFields::Valuta => "valuta",
             ViewQueryFields::RazpolozljivaZaloga => "razpolozljiva_zaloga",
             ViewQueryFields::MinimalnaZaloga => "minimalna_zaloga",
